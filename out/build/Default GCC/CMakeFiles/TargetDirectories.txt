@@ -1,0 +1,3 @@
+/home/danmu/Documents/Programming/cpp-projects/gravity-sim/out/build/Default GCC/CMakeFiles/gravity-sim.dir
+/home/danmu/Documents/Programming/cpp-projects/gravity-sim/out/build/Default GCC/CMakeFiles/edit_cache.dir
+/home/danmu/Documents/Programming/cpp-projects/gravity-sim/out/build/Default GCC/CMakeFiles/rebuild_cache.dir
