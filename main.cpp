@@ -8,23 +8,25 @@
 const float g = 9.806;
 float timeScale = 1.e0f;
 float fps = 60.f;
-float minRest = 0.95f;
-float maxRest = 1.f;
+const int subSteps = 4;
+
+const float minRest = .95f;
+const float maxRest = .99f;
 
 const float windowScale = .5f;
-float FULLWIDTH = sf::VideoMode::getDesktopMode().width;
-float FULLHEIGHT = sf::VideoMode::getDesktopMode().height;
+const float FULLWIDTH = sf::VideoMode::getDesktopMode().width;
+const float FULLHEIGHT = sf::VideoMode::getDesktopMode().height;
 sf::Vector2u size(FULLWIDTH * windowScale, FULLHEIGHT * windowScale);
 // meters to pixels conversion
 float mToPx = FULLHEIGHT / 2;
 float pxToM = 1 / mToPx;
 
 // Number of balls
-int nBalls = 400;
-float minR = 10.f;
-float maxR = 10.f;
-float maxV = 1.f;
-float density = 10.f;
+int nBalls = 500;
+const float minR = 10.f;
+const float maxR = 10.f;
+const float maxV = 1.f;
+const float density = 10.f;
 
 struct Balls {
     std::vector<float> radiuses;
@@ -112,26 +114,25 @@ int main(int, char**){
             }
         }
         float dt = clock.restart().asSeconds() * timeScale;
+        float subDt = dt / subSteps;
         physicsTicks++;
         
-        const int subSteps = 1;
-        float subDt = dt / subSteps;
+        // physics
+        for (int i = 0; i < nBalls; i++) {
+            sf::Vector2f pos = balls.positions[i];
+            sf::Vector2f vel = balls.velocities[i];
+            
+            sf::Vector2f acc = findAccel(pos);
+            sf::Vector2f vHalf = vel + 0.5f * acc * dt;
+            pos += vHalf * dt;
+            acc = findAccel(pos);
+            vel = vHalf + 0.5f * acc * dt;
+            
+            balls.positions[i] = pos;
+            balls.velocities[i] = vel;
+        }
 
         for (int step = 0; step < subSteps; step++) {
-            // physics
-            for (int i = 0; i < nBalls; i++) {
-                sf::Vector2f pos = balls.positions[i];
-                sf::Vector2f vel = balls.velocities[i];
-                
-                sf::Vector2f acc = findAccel(pos);
-                sf::Vector2f vHalf = vel + 0.5f * acc * subDt;
-                pos += vHalf * subDt;
-                acc = findAccel(pos);
-                vel = vHalf + 0.5f * acc * subDt;
-                
-                balls.positions[i] = pos;
-                balls.velocities[i] = vel;
-            }
 
             // collisions
             for (int i = 0; i < nBalls; i++) {
