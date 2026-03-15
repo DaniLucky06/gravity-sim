@@ -1,0 +1,26 @@
+# Prerequisites
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+
+# CMake / VS Code Build Folders
+out/
+build/
+bin/
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+Testing/
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+
+# VS Code specific (Optional, but recommended)
+.vscode/
+*.code-workspace

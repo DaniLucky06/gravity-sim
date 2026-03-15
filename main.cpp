@@ -1,3 +1,5 @@
+#define _USE_MATH_DEFINES
+
 #include <iostream>
 #include <cmath>
 #include <array>
@@ -5,7 +7,7 @@
 #include <SFML/Graphics.hpp>
 // eventually add GLM for vector/matrix operations
 
-const float g = 9.806;
+const float g = 9.806f;
 float timeScale = 1.e0f;
 float fps = 60.f;
 const int subSteps = 4;
@@ -22,7 +24,7 @@ float mToPx = FULLHEIGHT / 2;
 float pxToM = 1 / mToPx;
 
 // Number of balls
-int nBalls = 500;
+int nBalls = 1000;
 const float minR = 10.f;
 const float maxR = 10.f;
 const float maxV = 1.f;
@@ -114,6 +116,7 @@ int main(int, char**){
             }
         }
         float dt = clock.restart().asSeconds() * timeScale;
+        if (dt > 0.01) dt = 0.01;
         float subDt = dt / subSteps;
         physicsTicks++;
         
