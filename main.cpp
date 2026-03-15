@@ -5,10 +5,11 @@
 #include <SFML/Graphics.hpp>
 // eventually add GLM for vector/matrix operations
 
-const float g = 19.806;
-float timeScale = 1.e-1f;
-float minRest = 1.f;
-float maxRest = .98f;
+const float g = 9.806;
+float timeScale = 1.e0f;
+float fps = 60.f;
+float minRest = 0.95f;
+float maxRest = 1.f;
 
 const float windowScale = .5f;
 float FULLWIDTH = sf::VideoMode::getDesktopMode().width;
@@ -19,10 +20,10 @@ float mToPx = FULLHEIGHT / 2;
 float pxToM = 1 / mToPx;
 
 // Number of balls
-int nBalls = 500;
-float minR = 20.f;
-float maxR = 20.f;
-float maxV = 3.f;
+int nBalls = 400;
+float minR = 10.f;
+float maxR = 10.f;
+float maxV = 1.f;
 float density = 10.f;
 
 struct Balls {
@@ -66,7 +67,7 @@ struct Balls {
     }
 };
 
-sf::Vector2f findAccel(sf::Vector2f& cPos);
+sf::Vector2f findAccel(const sf::Vector2f& cPos);
 float norm(sf::Vector2f vec);
 float dot(sf::Vector2f V1, sf::Vector2f V2);
 bool comp(const sf::Vector2f& v1, const sf::Vector2f& v2);
@@ -82,11 +83,17 @@ int main(int, char**){
 
     // time
     sf::Clock clock;
-    float dt;
+    sf::Clock renderClock;
+    
+    float renderDt = 1.f / fps;
+    
+    sf::Clock metricsClock;
+    int physicsTicks = 0;
+    int renderFrames = 0;
 
     // physics vars
-    sf::Vector2f pos, pxPos, vel, acc, vHalf;
-    float rest, radius;
+    sf::Vector2f pxPos;
+    float radius;
 
     while (window.isOpen())
     {
@@ -101,98 +108,164 @@ int main(int, char**){
                 size = window.getSize();
                 window.setView(sf::View(sf::FloatRect(0.f, 0.f, size.x, size.y)));
             }
-            if (event.type == sf::Event::KeyPressed) {
+            if (event.type == sf::Event::MouseMoved) {
             }
         }
-        dt = clock.restart().asSeconds() * timeScale;
+        float dt = clock.restart().asSeconds() * timeScale;
+        physicsTicks++;
         
-        // clear screen
-        window.clear();
-        
-        // window dragging
-        windowPos = window.getPosition();
-        
-        // physics
-        for (int i = 0; i < nBalls; i++) {
-            pos = balls.positions[i];
-            vel = balls.velocities[i];
-            /*
-            std::vector<sf::Vector2f>::iterator maxIt = std::max_element(balls.velocities.begin(), balls.velocities.end(), comp);
-            float maxVel = norm(*maxIt);
-            float c = 255 * norm(vel) / maxVel;
-            balls.colors[i] = sf::Color(255, c, c, 255);
-            balls.circles[i].setFillColor(balls.colors[i]);
-            */
-            radius = balls.radiuses[i];
-            acc = findAccel(pos);
-            vHalf = vel + .5f * acc * dt;
-            pos = pos + vHalf * dt;
-            acc = findAccel(pos);
-            vel = vHalf + .5f * acc * dt;
-            balls.positions[i] = pos;
-            balls.velocities[i] = vel;
+        const int subSteps = 1;
+        float subDt = dt / subSteps;
 
-            // ball
-            rest = balls.restitutions[i];
-            for (int j = i + 1; j < nBalls; j++) {
-                sf::Vector2f direction = balls.positions[j] - balls.positions[i]; // m
-                float distance = norm(direction); // m
-                float r1 = balls.radiuses[i] * pxToM; // m
-                float r2 = balls.radiuses[j] * pxToM; // m
+        for (int step = 0; step < subSteps; step++) {
+            // physics
+            for (int i = 0; i < nBalls; i++) {
+                sf::Vector2f pos = balls.positions[i];
+                sf::Vector2f vel = balls.velocities[i];
                 
-                float radDist = (r2 + r1); // m
-                if (distance < radDist) {
-                    // distancing
-                    sf::Vector2f n = direction / distance; // m
-                    balls.positions[i] += -1.f * r1 * n * (1 - distance/radDist);
-                    balls.positions[j] += 1.f * r2 * n * (1 - distance/radDist); // m/m*px * m/px = m
-                    
-                    // collision management
-                    sf::Vector2f v1 = balls.velocities[i]; // m/s
-                    sf::Vector2f v2 = balls.velocities[j]; // m/s
-                    float m1 = balls.masses[i];
-                    float m2 = balls.masses[j];
-                    float e = balls.restitutions[i] * balls.restitutions[j];
+                sf::Vector2f acc = findAccel(pos);
+                sf::Vector2f vHalf = vel + 0.5f * acc * subDt;
+                pos += vHalf * subDt;
+                acc = findAccel(pos);
+                vel = vHalf + 0.5f * acc * subDt;
+                
+                balls.positions[i] = pos;
+                balls.velocities[i] = vel;
+            }
 
-                    float J = -(1 + e) * dot(v2 - v1, n) / (1 / m1 + 1 / m2);
-                    balls.velocities[i] = v1 - J/m1 * n;
-                    balls.velocities[j] = v2 + J/m2 * n;
+            // collisions
+            for (int i = 0; i < nBalls; i++) {
+                /* // color management [old]
+                std::vector<sf::Vector2f>::iterator maxIt = std::max_element(balls.velocities.begin(), balls.velocities.end(), comp);
+                float maxVel = norm(*maxIt);
+                float c = 255 * norm(vel) / maxVel;
+                balls.colors[i] = sf::Color(255, c, c, 255);
+                balls.circles[i].setFillColor(balls.colors[i]);
+                */
+
+                // ball collisions
+                float r1 = balls.radiuses[i] * pxToM;
+                float invM1 = 1.0f / balls.masses[i];
+                float rest1 = balls.restitutions[i];
+
+                sf::Vector2f& p1 = balls.positions[i]; 
+                sf::Vector2f& v1 = balls.velocities[i];
+
+                for (int j = i + 1; j < nBalls; j++) {
+                    sf::Vector2f& p2 = balls.positions[j];
+                    sf::Vector2f& v2 = balls.velocities[j];
+
+                    float dx = p2.x - p1.x;
+                    float dy = p2.y - p1.y;
+                    float distSq = dx * dx + dy * dy;
+                    
+                    float r2 = balls.radiuses[j] * pxToM;
+                    float radDist = r1 + r2;
+
+                    if (distSq < radDist * radDist && distSq > 0.00001f) {
+                        float distance = std::sqrt(distSq);
+                        float invDist = 1.0f / distance;
+                        
+                        float nx = dx * invDist;
+                        float ny = dy * invDist;
+                        
+                        float invM2 = 1.0f / balls.masses[j];
+                        float sumInvMass = invM1 + invM2;
+
+                        // distancing
+                        float overlap = radDist - distance;
+                        float correction = overlap / sumInvMass;
+                        float cx = nx * correction;
+                        float cy = ny * correction;
+                        
+                        p1.x -= cx * invM1;
+                        p1.y -= cy * invM1;
+                        p2.x += cx * invM2;
+                        p2.y += cy * invM2;
+                        
+                        // collision management
+                        float dvx = v2.x - v1.x;
+                        float dvy = v2.y - v1.y;
+                        float dotProd = dvx * nx + dvy * ny;
+
+                        if (dotProd < 0.f) { 
+                            float e = rest1 * balls.restitutions[j];
+                            float J = -(1.f + e) * dotProd / sumInvMass;
+                            
+                            float Jnx = J * nx;
+                            float Jny = J * ny;
+                            
+                            v1.x -= Jnx * invM1;
+                            v1.y -= Jny * invM1;
+                            v2.x += Jnx * invM2;
+                            v2.y += Jny * invM2;
+                        }
+                    }
                 }
             }
 
             // border collisions
-            vel = balls.velocities[i];
-            pxPos = balls.positions[i] * mToPx;
-            if (pxPos.x < radius + windowPos.x) {
-                vel.x = -vel.x * rest;
-                pxPos.x = radius + windowPos.x;
-            } else if (pxPos.x > size.x - radius + windowPos.x) {
-                vel.x = -vel.x * rest;
-                pxPos.x = size.x - radius + windowPos.x;
+            for (int i = 0; i < nBalls; i++) {
+                sf::Vector2f& p = balls.positions[i];
+                sf::Vector2f& v = balls.velocities[i];
+                float radius = balls.radiuses[i];
+                float rest = balls.restitutions[i];
+                
+                float px = p.x * mToPx;
+                float py = p.y * mToPx;
+                
+                if (px < radius + windowPos.x) {
+                    v.x = -v.x * rest;
+                    px = radius + windowPos.x;
+                } else if (px > size.x - radius + windowPos.x) {
+                    v.x = -v.x * rest;
+                    px = size.x - radius + windowPos.x;
+                }
+                if (py < radius + windowPos.y)  {
+                    v.y = -v.y * rest;
+                    py = radius + windowPos.y;
+                } else if (py > size.y - radius + windowPos.y) {
+                    v.y = -v.y * rest;
+                    py = size.y - radius + windowPos.y;
+                }
+                
+                p.x = px * pxToM;
+                p.y = py * pxToM;
             }
-            if (pxPos.y < radius + windowPos.y)  {
-                vel.y = -vel.y * rest;
-                pxPos.y = radius + windowPos.y;
-            } else if (pxPos.y > size.y - radius + windowPos.y) {
-                vel.y = -vel.y * rest;
-                pxPos.y = size.y - radius + windowPos.y;
-            }
-            balls.positions[i] = pxPos * pxToM;
-            balls.velocities[i] = vel;
-
-            // change render positions
-            balls.circles[i].setPosition(pxPos.x - windowPos.x, pxPos.y - windowPos.y);
-            window.draw(balls.circles[i]);
         }
 
-        // windowPos = window.getPosition();
+        // graphics rendering
+        if (renderClock.getElapsedTime().asSeconds() >= renderDt) {
+            renderFrames++;
 
-        // Update the window
-        window.display();
+            windowPos = window.getPosition();
+
+            window.clear();
+
+            for (int i = 0; i < nBalls; i++) {
+                pxPos = balls.positions[i] * mToPx;
+                balls.circles[i].setPosition(pxPos.x - windowPos.x, pxPos.y - windowPos.y);
+                window.draw(balls.circles[i]);
+            }
+
+            window.display();
+            renderClock.restart();
+        }
+
+        if (metricsClock.getElapsedTime().asSeconds() >= 1.0f) {
+            std::cout << "FPS: " << renderFrames
+                      << " | Physics Ticks (UPS): " << physicsTicks 
+                      << " | Rapporto: " << (float)physicsTicks / renderFrames << " calcoli per frame\n";
+            
+            // Resetta i contatori per il secondo successivo
+            physicsTicks = 0;
+            renderFrames = 0;
+            metricsClock.restart();
+        }
     }
 }
 
-sf::Vector2f findAccel(sf::Vector2f& cPos) {
+sf::Vector2f findAccel(const sf::Vector2f& cPos) {
     return sf::Vector2f(0.f, g);
 }
 
