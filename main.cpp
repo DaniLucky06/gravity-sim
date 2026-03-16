@@ -6,25 +6,29 @@
 // eventually add GLM for vector/matrix operations
 
 const float g = 9.806;
+const float G = 1.f;
+const float offset = .1f;
 float timeScale = 1.e0f;
 float fps = 60.f;
 const int subSteps = 4;
+const bool debugTimeOutput = false;
 
-const float minRest = .95f;
-const float maxRest = .99f;
+const float minRest = .9f;
+const float maxRest = .9f;
 
 const float windowScale = .5f;
 const float FULLWIDTH = sf::VideoMode::getDesktopMode().width;
 const float FULLHEIGHT = sf::VideoMode::getDesktopMode().height;
 sf::Vector2u size(FULLWIDTH * windowScale, FULLHEIGHT * windowScale);
+bool mousePressed = false;
 // meters to pixels conversion
 float mToPx = FULLHEIGHT / 2;
 float pxToM = 1 / mToPx;
 
 // Number of balls
-int nBalls = 500;
-const float minR = 10.f;
-const float maxR = 10.f;
+int nBalls = 200;
+const float minR = 20.f;
+const float maxR = 20.f;
 const float maxV = 1.f;
 const float density = 10.f;
 
@@ -110,7 +114,10 @@ int main(int, char**){
                 size = window.getSize();
                 window.setView(sf::View(sf::FloatRect(0.f, 0.f, size.x, size.y)));
             }
-            if (event.type == sf::Event::MouseMoved) {
+            if (event.type == sf::Event::MouseButtonPressed) {
+                if (sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)) {
+                    mousePressed = !mousePressed;
+                }
             }
         }
         float dt = clock.restart().asSeconds() * timeScale;
@@ -253,7 +260,7 @@ int main(int, char**){
             renderClock.restart();
         }
 
-        if (metricsClock.getElapsedTime().asSeconds() >= 1.0f) {
+        if (metricsClock.getElapsedTime().asSeconds() >= 1.0f && debugTimeOutput) {
             std::cout << "FPS: " << renderFrames
                       << " | Physics Ticks (UPS): " << physicsTicks 
                       << " | Rapporto: " << (float)physicsTicks / renderFrames << " calcoli per frame\n";
@@ -267,7 +274,18 @@ int main(int, char**){
 }
 
 sf::Vector2f findAccel(const sf::Vector2f& cPos) {
-    return sf::Vector2f(0.f, g);
+    // return sf::Vector2f(0.f, g);
+    
+    if (mousePressed) {
+        sf::Vector2f mousePos = static_cast<sf::Vector2f>(sf::Mouse::getPosition()) * pxToM;
+        float dx = cPos.x - mousePos.x;
+        float dy = cPos.y - mousePos.y;
+        float dSqr = dx * dx + dy * dy;
+        float acc = G / (dSqr + offset);
+        float d = std::sqrt(dSqr);
+        return sf::Vector2f(-dx*acc/d, -dy*acc/d);
+    }
+    return sf::Vector2f(0.f, 0.f);
 }
 
 float norm(sf::Vector2f vec) {
