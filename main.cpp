@@ -73,6 +73,7 @@ struct Balls {
     }
 };
 
+
 sf::Vector2f findAccel(const sf::Vector2f& cPos);
 float norm(sf::Vector2f vec);
 float dot(sf::Vector2f V1, sf::Vector2f V2);
