@@ -3,6 +3,8 @@
 #include <array>
 #include <algorithm>
 #include <SFML/Graphics.hpp>
+
+#include "quadTree.hpp"
 // eventually add GLM for vector/matrix operations
 
 const float g = 9.806;
@@ -13,8 +15,8 @@ float fps = 60.f;
 const int subSteps = 4;
 const bool debugTimeOutput = false;
 
-const float minRest = .9f;
-const float maxRest = .9f;
+const float minRest = .5f;
+const float maxRest = .5f;
 
 const float windowScale = .5f;
 const float FULLWIDTH = sf::VideoMode::getDesktopMode().width;
@@ -275,8 +277,8 @@ int main(int, char**){
 }
 
 sf::Vector2f findAccel(const sf::Vector2f& cPos) {
-    // return sf::Vector2f(0.f, g);
-    
+    return sf::Vector2f(0.f, g);
+    /*
     if (mousePressed) {
         sf::Vector2f mousePos = static_cast<sf::Vector2f>(sf::Mouse::getPosition()) * pxToM;
         float dx = cPos.x - mousePos.x;
@@ -285,7 +287,7 @@ sf::Vector2f findAccel(const sf::Vector2f& cPos) {
         float acc = G / (dSqr + offset);
         float d = std::sqrt(dSqr);
         return sf::Vector2f(-dx*acc/d, -dy*acc/d);
-    }
+    }*/
     return sf::Vector2f(0.f, 0.f);
 }
 
