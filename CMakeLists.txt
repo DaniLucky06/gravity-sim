@@ -4,6 +4,7 @@ project(gravity-sim VERSION 0.1.0 LANGUAGES C CXX)
 set( TARGET ${PROJECT_NAME} )
 set( SOURCE_PATH "${PROJECT_SOURCE_DIR}/src" )
 set( INCLUDE_PATH "${PROJECT_SOURCE_DIR}/include" )
+set(SFML_DIR "C:/Users/musne/Programming/cpp/.Libraries/SFML-2.6.2/lib/cmake/SFML") # FOR WINDOWS
 
 file( GLOB_RECURSE HPPS "${INCLUDE_PATH}/*.hpp" )
 file( GLOB_RECURSE CPPS "${SOURCE_PATH}/*.cpp" )
