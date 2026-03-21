@@ -9,14 +9,14 @@
 
 const float g = 9.806;
 const float G = 1.f;
-const float offset = .1f;
+const float offset = .01f;
 float timeScale = 1.e0f;
 float fps = 60.f;
 const int subSteps = 4;
 const bool debugTimeOutput = false;
 
-const float minRest = .5f;
-const float maxRest = .5f;
+const float minRest = .7f;
+const float maxRest = .7f;
 
 const float windowScale = .5f;
 const float FULLWIDTH = sf::VideoMode::getDesktopMode().width;
@@ -277,17 +277,17 @@ int main(int, char**){
 }
 
 sf::Vector2f findAccel(const sf::Vector2f& cPos) {
-    return sf::Vector2f(0.f, g);
-    /*
+    // return sf::Vector2f(0.f, g);
+    
     if (mousePressed) {
         sf::Vector2f mousePos = static_cast<sf::Vector2f>(sf::Mouse::getPosition()) * pxToM;
         float dx = cPos.x - mousePos.x;
         float dy = cPos.y - mousePos.y;
         float dSqr = dx * dx + dy * dy;
         float acc = G / (dSqr + offset);
-        float d = std::sqrt(dSqr);
+        float d = std::sqrt(dSqr + offset);
         return sf::Vector2f(-dx*acc/d, -dy*acc/d);
-    }*/
+    }
     return sf::Vector2f(0.f, 0.f);
 }
 

@@ -319,6 +319,10 @@ public:
         }
     }
 
+    void remove(const QuadElt& ball) {
+        
+    }
+
     void cleanup () {
         std::vector<int> toProcess; // Array of nodes left to process
 
