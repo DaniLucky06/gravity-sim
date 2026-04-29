@@ -38,7 +38,7 @@ int nBalls = 200;
 const float minR = 20.f;
 const float maxR = 20.f;
 
-const float maxV = 1.f;
+const float maxV = 1.e-4f;
 
 const float density = 10.f;
 
@@ -121,7 +121,8 @@ int main(int, char**){
     float radius;
 
     // Initialize Quadtree
-    Quadtree ballTree(size.x * pxToM, size.y * pxToM, 5, 3);
+    Quadtree ballTree(FULLWIDTH * pxToM, FULLHEIGHT * pxToM, 5, 3);
+
     for (int i = 0; i < nBalls; i++) {
         ballTree.insert(balls.treeElts[i]);
     }
@@ -318,8 +319,9 @@ int main(int, char**){
 }
 
 sf::Vector2f findAccel(const sf::Vector2f& cPos) {
-    // return sf::Vector2f(0.f, g);
+    return sf::Vector2f(0.f, g);
     
+    /*
     if (mousePressed) {
         sf::Vector2f mousePos = static_cast<sf::Vector2f>(sf::Mouse::getPosition()) * pxToM;
         float dx = cPos.x - mousePos.x;
@@ -330,6 +332,7 @@ sf::Vector2f findAccel(const sf::Vector2f& cPos) {
         return sf::Vector2f(-dx*acc/d, -dy*acc/d);
     }
     return sf::Vector2f(0.f, 0.f);
+    */
 }
 
 float norm(sf::Vector2f vec) {
