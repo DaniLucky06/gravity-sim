@@ -7,7 +7,7 @@
 #include "quadTree.hpp"
 // eventually add GLM for vector/matrix operations
 
-float g = 9.806e-1f;
+float g = 9.806e0f;
 float G = 1.f;
 float offset = .01f;
 float timeScale = 1.e0f;
@@ -16,7 +16,7 @@ float fps = 60.f;
 int subSteps = 4;
 int treeDepth = 6;
 int maxEltPerNode = 3;
-bool debugTimeOutput = true;
+bool debugTimeOutput = false;
 
 float minRest = 0.9f;
 float maxRest = 0.9f;
@@ -44,6 +44,7 @@ float maxR = 5.f;
 float maxV = 1.e0f;
 
 float density = 1.e-1f;
+bool gravityRadial = false;
 
 struct Balls {
     std::vector<float> masses;
@@ -112,30 +113,36 @@ void parseArguments(int argc, char* argv[]) {
                       << "  --nBalls <int>       Number of balls (default: 2000)\n"
                       << "  --g <float>          Gravity (default: 9.806)\n"
                       << "  --G <float>          Mouse gravity constant (default: 1.0)\n"
-                      << "  --minR <float>       Minimum radius in pixels (default: 3.0)\n"
-                      << "  --maxR <float>       Maximum radius in pixels (default: 10.0)\n"
+                      << "  --rMin <float>       Minimum radius in pixels (default: 5.0)\n"
+                      << "  --rMax <float>       Maximum radius in pixels (default: 5.0)\n"
+                      << "  --rFix <float>       Uniform radius in pixels\n"
                       << "  --maxV <float>       Maximum initial velocity (default: 0.0)\n"
                       << "  --density <float>    Ball density (default: 10.0)\n"
                       << "  --subSteps <int>     Physics sub-steps (default: 4)\n"
                       << "  --timeScale <float>  Time scale multiplier (default: 1.0)\n"
-                      << "  --minRest <float>    Minimum restitution (default: 0.7)\n"
-                      << "  --maxRest <float>    Maximum restitution (default: 0.7)\n"
+                      << "  --restMin <float>    Minimum restitution (default: 0.7)\n"
+                      << "  --restMax <float>    Maximum restitution (default: 0.7)\n"
+                      << "  --restMax <float>    Uniform restitution\n"
                       << "  --scale <float>      Window scale (default: 0.5)\n"
+                      << "  --g-radial           Gravity mode radial\n"
                       << "  --debug              Enable console debug output\n";
             exit(0);
         }
         else if (arg == "--nBalls" && i + 1 < argc) nBalls = std::stoi(argv[++i]);
         else if (arg == "--g" && i + 1 < argc) g = std::stof(argv[++i]);
         else if (arg == "--G" && i + 1 < argc) G = std::stof(argv[++i]);
-        else if (arg == "--minR" && i + 1 < argc) minR = std::stof(argv[++i]);
-        else if (arg == "--maxR" && i + 1 < argc) maxR = std::stof(argv[++i]);
+        else if (arg == "--rMin" && i + 1 < argc) minR = std::stof(argv[++i]);
+        else if (arg == "--rMax" && i + 1 < argc) maxR = std::stof(argv[++i]);
+        else if (arg == "--rFix" && i + 1 < argc) {maxR = std::stof(argv[++i]); minR = maxR;}
         else if (arg == "--maxV" && i + 1 < argc) maxV = std::stof(argv[++i]);
         else if (arg == "--density" && i + 1 < argc) density = std::stof(argv[++i]);
         else if (arg == "--subSteps" && i + 1 < argc) subSteps = std::stoi(argv[++i]);
         else if (arg == "--timeScale" && i + 1 < argc) timeScale = std::stof(argv[++i]);
-        else if (arg == "--minRest" && i + 1 < argc) minRest = std::stof(argv[++i]);
-        else if (arg == "--maxRest" && i + 1 < argc) maxRest = std::stof(argv[++i]);
+        else if (arg == "--restMin" && i + 1 < argc) minRest = std::stof(argv[++i]);
+        else if (arg == "--restMax" && i + 1 < argc) maxRest = std::stof(argv[++i]);
+        else if (arg == "--restFix" && i + 1 < argc) {maxRest = std::stof(argv[++i]); minRest = maxRest;}
         else if (arg == "--scale" && i + 1 < argc) windowScale = std::stof(argv[++i]);
+        else if (arg == "--g-radial") gravityRadial = true;
         else if (arg == "--debug") debugTimeOutput = true;
     }
 }
@@ -369,10 +376,7 @@ int main(int argc, char* argv[]){
 }
 
 sf::Vector2f findAccel(const sf::Vector2f& cPos) {
-    return sf::Vector2f(0.f, g);
-    
-    /*
-    if (mousePressed) {
+    if (gravityRadial && mousePressed) {
         sf::Vector2f mousePos = static_cast<sf::Vector2f>(sf::Mouse::getPosition()) * pxToM;
         float dx = cPos.x - mousePos.x;
         float dy = cPos.y - mousePos.y;
@@ -380,9 +384,11 @@ sf::Vector2f findAccel(const sf::Vector2f& cPos) {
         float acc = G / (dSqr + offset);
         float d = std::sqrt(dSqr + offset);
         return sf::Vector2f(-dx*acc/d, -dy*acc/d);
+    } else if (gravityRadial) {
+        return sf::Vector2f(0.f, 0.f);
     }
-    return sf::Vector2f(0.f, 0.f);
-    */
+
+    return sf::Vector2f(0.f, g);
 }
 
 float norm(sf::Vector2f vec) {
