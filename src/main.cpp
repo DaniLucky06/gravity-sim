@@ -7,10 +7,10 @@
 #include "quadTree.hpp"
 // eventually add GLM for vector/matrix operations
 
-const float g = 9.806;
+const float g = 9.806e-1f;
 const float G = 1.f;
 const float offset = .01f;
-float timeScale = 1.e-4f;
+float timeScale = 1.e0f;
 float fps = 60.f;
 const int subSteps = 4;
 const bool debugTimeOutput = false;
@@ -32,15 +32,15 @@ float mToPx = FULLHEIGHT / 2;
 float pxToM = 1 / mToPx;
 
 // Number of balls
-int nBalls = 200;
+int nBalls = 2000;
 
 // Radius params
-const float minR = 20.f;
-const float maxR = 20.f;
+const float minR = 3.f;
+const float maxR = 10.f;
 
-const float maxV = 1.e-4f;
+const float maxV = 0.e1f;
 
-const float density = 10.f;
+const float density = 1.e-1f;
 
 struct Balls {
     std::vector<float> masses;
@@ -63,8 +63,8 @@ struct Balls {
         srand(time(0));
         float fRAND_MAX = static_cast<float>(RAND_MAX);
         for (int i = 0; i < n; i++) {
-            float radius = (rand() / fRAND_MAX * (maxR - minR)) + minR;
-            radius *= pxToM;
+            float pRadius = (rand() / fRAND_MAX * (maxR - minR)) + minR;
+            float radius = pxToM * pRadius;
 
             masses[i] = radius * radius * M_PI * density;
 
@@ -75,9 +75,11 @@ struct Balls {
 
             float X = rand() / fRAND_MAX;
             float Y = rand() / fRAND_MAX;
-            X = (X * (static_cast<float>(size.x) - 2 * radius) + window.getPosition().x) * pxToM;
-            Y = (Y * (static_cast<float>(size.y) - 2 * radius) + window.getPosition().y) * pxToM;
+            X = (X * (static_cast<float>(size.x) - 2 * pRadius) + window.getPosition().x + pRadius) * pxToM;
+            Y = (Y * (static_cast<float>(size.y) - 2 * pRadius) + window.getPosition().y + pRadius) * pxToM;
             positions[i] = {X, Y};
+            treeElts[i].cx = X;
+            treeElts[i].cy = Y;
             treeElts[i] = QuadElt(radius, X, Y);
             treeElts[i].objId = i;
 
@@ -85,9 +87,9 @@ struct Balls {
             restitutions[i] = (rand() / fRAND_MAX) * (maxRest - minRest) + minRest;
 
             // update circles
-            circles[i].setRadius(radius);
+            circles[i].setRadius(pRadius);
             circles[i].setFillColor(color);
-            circles[i].setOrigin({radius, radius});
+            circles[i].setOrigin({pRadius, pRadius});
         }
     }
 };
@@ -121,7 +123,7 @@ int main(int, char**){
     float radius;
 
     // Initialize Quadtree
-    Quadtree ballTree(FULLWIDTH * pxToM, FULLHEIGHT * pxToM, 5, 3);
+    Quadtree ballTree(FULLWIDTH * pxToM, FULLHEIGHT * pxToM, 8, 4);
 
     for (int i = 0; i < nBalls; i++) {
         ballTree.insert(balls.treeElts[i]);
@@ -131,7 +133,7 @@ int main(int, char**){
     while (window.isOpen())
     {
         // Process events
-        while (const std::optional<sf::Event> event = window.pollEvent()) // closing window logic
+        while (const std::optional<sf::Event> event = window.pollEvent()) // window event logic
         {
             // Close window: exit
             if (event->is<sf::Event::Closed>()) {
@@ -147,6 +149,8 @@ int main(int, char**){
                 }
             }
         }
+
+        sf::Vector2i windowPos = window.getPosition();
         float dt = clock.restart().asSeconds() * timeScale;
         float subDt = dt / subSteps;
         physicsTicks++;
@@ -168,17 +172,18 @@ int main(int, char**){
 
             // border velocity reflection logic
             float radius = balls.treeElts[i].radius;
-            sf::Vector2f pPos = pos * mToPx;
+            float pRadius = radius * mToPx;
+            sf::Vector2f pxPos = pos * mToPx;
             float rest = balls.restitutions[i];
 
-            if (pPos.x < radius + windowPos.x || pPos.x > size.x - radius + windowPos.x) {
+            if ((pxPos.x < pRadius + windowPos.x && vel.x < 0) || (pxPos.x > size.x - pRadius + windowPos.x && vel.x > 0)) {
                 vel.x = -vel.x * rest;
             }
-            if (pPos.y < radius + windowPos.y || pPos.y > size.y - radius + windowPos.y) {
+            if ((pxPos.y < pRadius + windowPos.y && vel.y < 0) || (pxPos.y > size.y - pRadius + windowPos.y && vel.y > 0)) {
                 vel.y = -vel.y * rest;
             }
 
-            // updating in balls
+            // updating physics coordinates
             balls.positions[i] = pos;
             balls.velocities[i] = vel;
 
@@ -246,7 +251,7 @@ int main(int, char**){
                         sf::Vector2f Jn = J * n;
                         
                         vel1 -= Jn * invM1;
-                        vel2 -= Jn * invM2;
+                        vel2 += Jn * invM2;
                     }
                 }
             }
@@ -256,24 +261,25 @@ int main(int, char**){
                 sf::Vector2f& pos = balls.positions[i];
                 sf::Vector2f& vel = balls.velocities[i];
                 float radius = balls.treeElts[i].radius;
+                float pRadius = radius * mToPx;
                 float rest = balls.restitutions[i];
                 
                 // getting the positions (IN METERS converted to PIXELS)
                 sf::Vector2f pxPos = pos * mToPx;
                 
                 bool posChanged = false;
-                if (pxPos.x < radius + windowPos.x) {
-                    pxPos.x = radius + windowPos.x;
+                if (pxPos.x < pRadius + windowPos.x) {
+                    pxPos.x = pRadius + windowPos.x;
                     posChanged = true;
-                } else if (pxPos.x > size.x - radius + windowPos.x) {
-                    pxPos.x = size.x - radius + windowPos.x;
+                } else if (pxPos.x > size.x - pRadius + windowPos.x) {
+                    pxPos.x = size.x - pRadius + windowPos.x;
                     posChanged = true;
                 }
-                if (pxPos.y < radius + windowPos.y)  {
-                    pxPos.y = radius + windowPos.y;
+                if (pxPos.y < pRadius + windowPos.y)  {
+                    pxPos.y = pRadius + windowPos.y;
                     posChanged = true;
-                } else if (pxPos.y > size.y - radius + windowPos.y) {
-                    pxPos.y = size.y - radius + windowPos.y;
+                } else if (pxPos.y > size.y - pRadius + windowPos.y) {
+                    pxPos.y = size.y - pRadius + windowPos.y;
                     posChanged = true;
                 }
                 
@@ -284,11 +290,12 @@ int main(int, char**){
             }
         }
 
+        // CLEAN THE EMTPY LEAFS AND BRANCHES!!!
+        ballTree.cleanup();
+
         // graphics rendering
         if (renderClock.getElapsedTime().asSeconds() >= renderDt) {
             renderFrames++;
-
-            windowPos = window.getPosition();
 
             window.clear();
 
