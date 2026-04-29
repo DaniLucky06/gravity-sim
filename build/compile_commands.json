@@ -1,8 +1,0 @@
-[
-{
-  "directory": "/home/danmu/Documents/Programming/cpp-projects/gravity-sim/build",
-  "command": "/usr/bin/c++   -g -o CMakeFiles/gravity-sim.dir/main.cpp.o -c /home/danmu/Documents/Programming/cpp-projects/gravity-sim/main.cpp",
-  "file": "/home/danmu/Documents/Programming/cpp-projects/gravity-sim/main.cpp",
-  "output": "CMakeFiles/gravity-sim.dir/main.cpp.o"
-}
-]

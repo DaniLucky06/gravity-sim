@@ -1,1 +1,0 @@
-/usr/bin/c++ -g -Wl,--dependency-file=CMakeFiles/gravity-sim.dir/link.d "CMakeFiles/gravity-sim.dir/main.cpp.o" -o gravity-sim

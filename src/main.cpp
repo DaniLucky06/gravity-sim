@@ -2,7 +2,7 @@
 #include <cmath>
 #include <array>
 #include <algorithm>
-#include <SFML/Graphics.hpp>
+#include <SFML/Graphics.hpp>  
 
 #include "quadTree.hpp"
 // eventually add GLM for vector/matrix operations
@@ -19,8 +19,8 @@ const float minRest = .7f;
 const float maxRest = .7f;
 
 const float windowScale = .5f;
-const float FULLWIDTH = sf::VideoMode::getDesktopMode().width;
-const float FULLHEIGHT = sf::VideoMode::getDesktopMode().height;
+const float FULLWIDTH = sf::VideoMode::getDesktopMode().size.x;
+const float FULLHEIGHT = sf::VideoMode::getDesktopMode().size.y;
 sf::Vector2u size(FULLWIDTH * windowScale, FULLHEIGHT * windowScale);
 bool mousePressed = false;
 // meters to pixels conversion
@@ -70,7 +70,7 @@ struct Balls {
             // update circles
             circles[i].setRadius(radius);
             circles[i].setFillColor(color);
-            circles[i].setOrigin(radius, radius);
+            circles[i].setOrigin({radius, radius});
         }
     }
 };
@@ -82,8 +82,8 @@ float dot(sf::Vector2f V1, sf::Vector2f V2);
 bool comp(const sf::Vector2f& v1, const sf::Vector2f& v2);
 
 int main(int, char**){
-    sf::RenderWindow window(sf::VideoMode(size.x, size.y), "Bawls");
-    sf::View fixedView(sf::FloatRect(0.f, 0.f, size.x, size.y));
+    sf::RenderWindow window(sf::VideoMode({size.x, size.y}), "Bawls");
+    sf::View fixedView(sf::FloatRect({0.f, 0.f}, {static_cast<float>(size.x), static_cast<float>(size.y)}));
     window.setView(fixedView);
     sf::Vector2i windowPos = window.getPosition();
 
@@ -107,18 +107,18 @@ int main(int, char**){
     while (window.isOpen())
     {
         // Process events
-        sf::Event event;
-        while (window.pollEvent(event)) // closing window logic
+        while (const std::optional<sf::Event> event = window.pollEvent()) // closing window logic
         {
             // Close window: exit
-            if (event.type == sf::Event::Closed)
+            if (event->is<sf::Event::Closed>()) {
                 window.close();
-            if (event.type == sf::Event::Resized){
-                size = window.getSize();
-                window.setView(sf::View(sf::FloatRect(0.f, 0.f, size.x, size.y)));
-            }
-            if (event.type == sf::Event::MouseButtonPressed) {
-                if (sf::Mouse::isButtonPressed(sf::Mouse::Button::Left)) {
+            } 
+            else if (const auto* resized = event->getIf<sf::Event::Resized>()) {
+                size = resized->size;
+                window.setView(sf::View(sf::FloatRect({0.f, 0.f}, {static_cast<float>(size.x), static_cast<float>(size.y)})));
+            } 
+            else if (const auto* mousePressedEvent = event->getIf<sf::Event::MouseButtonPressed>()) {
+                if (mousePressedEvent->button == sf::Mouse::Button::Left) {
                     mousePressed = !mousePressed;
                 }
             }
@@ -255,7 +255,7 @@ int main(int, char**){
 
             for (int i = 0; i < nBalls; i++) {
                 pxPos = balls.positions[i] * mToPx;
-                balls.circles[i].setPosition(pxPos.x - windowPos.x, pxPos.y - windowPos.y);
+                balls.circles[i].setPosition({pxPos.x - static_cast<float>(windowPos.x), pxPos.y - static_cast<float>(windowPos.y)});
                 window.draw(balls.circles[i]);
             }
 
