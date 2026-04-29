@@ -12,6 +12,7 @@ float G = 1.f;
 float offset = .01f;
 float timeScale = 1.e0f;
 float fps = 60.f;
+float fixedDt = 1.f / 10.f;
 
 int subSteps = 4;
 int treeDepth = 6;
@@ -180,6 +181,7 @@ int main(int argc, char* argv[]){
     }
     
 
+    float accumulator = 0.f;
     while (window.isOpen())
     {
         // Process events
@@ -201,147 +203,153 @@ int main(int argc, char* argv[]){
         }
 
         sf::Vector2i windowPos = window.getPosition();
-        float dt = clock.restart().asSeconds() * timeScale;
-        float subDt = dt / subSteps;
-        physicsTicks++;
+        float frameTime = clock.restart().asSeconds() * timeScale;
+
+        accumulator += frameTime;
         
-        // Physics and tree update
-        for (int i = 0; i < nBalls; i++) {
-            // remove from tree to update (reinsert at the end of the iteration)
-            ballTree.remove(balls.treeElts[i]);
+        while (accumulator >= fixedDt) {
+            physicsTicks++;
+            // Physics and tree update
+            for (int i = 0; i < nBalls; i++) {
+                // remove from tree to update (reinsert at the end of the iteration)
+                ballTree.remove(balls.treeElts[i]);
 
-            // Update position and velocity
-            sf::Vector2f pos = balls.positions[i];
-            sf::Vector2f vel = balls.velocities[i];
-            
-            sf::Vector2f acc = findAccel(pos);
-            sf::Vector2f vHalf = vel + 0.5f * acc * dt;
-            pos += vHalf * dt;
-            acc = findAccel(pos);
-            vel = vHalf + 0.5f * acc * dt;
+                // Update position and velocity
+                sf::Vector2f pos = balls.positions[i];
+                sf::Vector2f vel = balls.velocities[i];
+                
+                sf::Vector2f acc = findAccel(pos);
+                sf::Vector2f vHalf = vel + 0.5f * acc * fixedDt;
+                pos += vHalf * fixedDt;
+                acc = findAccel(pos);
+                vel = vHalf + 0.5f * acc * fixedDt;
 
-            // border velocity reflection logic
-            float radius = balls.treeElts[i].radius;
-            float pRadius = radius * mToPx;
-            sf::Vector2f pxPos = pos * mToPx;
-            float rest = balls.restitutions[i];
+                // border velocity reflection logic
+                float radius = balls.treeElts[i].radius;
+                float pRadius = radius * mToPx;
+                sf::Vector2f pxPos = pos * mToPx;
+                float rest = balls.restitutions[i];
 
-            if ((pxPos.x < pRadius + windowPos.x && vel.x < 0) || (pxPos.x > size.x - pRadius + windowPos.x && vel.x > 0)) {
-                vel.x = -vel.x * rest;
+                if ((pxPos.x < pRadius + windowPos.x && vel.x < 0) || (pxPos.x > size.x - pRadius + windowPos.x && vel.x > 0)) {
+                    vel.x = -vel.x * rest;
+                }
+                if ((pxPos.y < pRadius + windowPos.y && vel.y < 0) || (pxPos.y > size.y - pRadius + windowPos.y && vel.y > 0)) {
+                    vel.y = -vel.y * rest;
+                }
+
+                // updating physics coordinates
+                balls.positions[i] = pos;
+                balls.velocities[i] = vel;
+
+                // bounding box and ball element update
+                balls.treeElts[i].cx = pos.x;
+                balls.treeElts[i].cy = pos.y;
+                balls.treeElts[i].minX = pos.x - radius;
+                balls.treeElts[i].maxX = pos.x + radius;
+                balls.treeElts[i].minY = pos.y - radius;
+                balls.treeElts[i].maxY = pos.y + radius;
+
+                // re-insertion in tree
+                ballTree.insert(balls.treeElts[i]);
             }
-            if ((pxPos.y < pRadius + windowPos.y && vel.y < 0) || (pxPos.y > size.y - pRadius + windowPos.y && vel.y > 0)) {
-                vel.y = -vel.y * rest;
-            }
 
-            // updating physics coordinates
-            balls.positions[i] = pos;
-            balls.velocities[i] = vel;
+            // broad collisions from tree
+            std::vector<Quadtree::CollisionData> pairs = ballTree.getCollisions();
 
-            // bounding box and ball element update
-            balls.treeElts[i].cx = pos.x;
-            balls.treeElts[i].cy = pos.y;
-            balls.treeElts[i].minX = pos.x - radius;
-            balls.treeElts[i].maxX = pos.x + radius;
-            balls.treeElts[i].minY = pos.y - radius;
-            balls.treeElts[i].maxY = pos.y + radius;
+            // fine collisions with substepping
+            for (int step = 0; step < subSteps; step++) {
+                // ball collisions
+                for (const auto& pair: pairs) {
+                    // radiuses
+                    const float r1 = balls.treeElts[pair.id1].radius;
+                    const float r2 = balls.treeElts[pair.id2].radius;
+                    const float radDist = r1 + r2;
 
-            // re-insertion in tree
-            ballTree.insert(balls.treeElts[i]);
-        }
+                    // masses
+                    const float invM1 = 1.0f / balls.masses[pair.id1];
+                    const float invM2 = 1.0f / balls.masses[pair.id2];
 
-        // broad collisions from tree
-        std::vector<Quadtree::CollisionData> pairs = ballTree.getCollisions();
+                    // positions
+                    sf::Vector2f& pos1 = balls.positions[pair.id1];
+                    sf::Vector2f& pos2 = balls.positions[pair.id2];
+                    sf::Vector2f& vel1 = balls.velocities[pair.id1];
+                    sf::Vector2f& vel2 = balls.velocities[pair.id2];
 
-        // fine collisions with substepping
-        for (int step = 0; step < subSteps; step++) {
-            // ball collisions
-            for (const auto& pair: pairs) {
-                // radiuses
-                const float r1 = balls.treeElts[pair.id1].radius;
-                const float r2 = balls.treeElts[pair.id2].radius;
-                const float radDist = r1 + r2;
+                    sf::Vector2f dPos = pos2 - pos1;
+                    float distSq = dPos.lengthSquared();
 
-                // masses
-                const float invM1 = 1.0f / balls.masses[pair.id1];
-                const float invM2 = 1.0f / balls.masses[pair.id2];
-
-                // positions
-                sf::Vector2f& pos1 = balls.positions[pair.id1];
-                sf::Vector2f& pos2 = balls.positions[pair.id2];
-                sf::Vector2f& vel1 = balls.velocities[pair.id1];
-                sf::Vector2f& vel2 = balls.velocities[pair.id2];
-
-                sf::Vector2f dPos = pos2 - pos1;
-                float distSq = dPos.lengthSquared();
-
-                if (distSq < radDist * radDist && distSq > 0.00001f) {
-                    float distance = std::sqrt(distSq);
-                    float invDist = 1.0f / distance;
-                    
-                    sf::Vector2f n = dPos * invDist;
-                    
-                    float invSumInvMass = 1 / (invM1 + invM2);
-
-                    // distancing
-                    float overlap = radDist - distance;
-                    float correction = overlap * invSumInvMass;
-                    sf::Vector2f correctionVect = n * correction;
-                    
-                    pos1 -= correctionVect * invM1;
-                    pos2 += correctionVect * invM2;
-                    
-                    // collision management
-                    sf::Vector2f dVel = vel2 - vel1;
-                    float dotProd = dot(dVel, n);
-
-                    if (dotProd < 0.f) { 
-                        float e = balls.restitutions[pair.id1] * balls.restitutions[pair.id2];
-                        float J = -(1.f + e) * dotProd * invSumInvMass;
+                    if (distSq < radDist * radDist && distSq > 0.00001f) {
+                        float distance = std::sqrt(distSq);
+                        float invDist = 1.0f / distance;
                         
-                        sf::Vector2f Jn = J * n;
+                        sf::Vector2f n = dPos * invDist;
                         
-                        vel1 -= Jn * invM1;
-                        vel2 += Jn * invM2;
+                        float invSumInvMass = 1 / (invM1 + invM2);
+
+                        // distancing
+                        float overlap = radDist - distance;
+                        float correction = overlap * invSumInvMass;
+                        sf::Vector2f correctionVect = n * correction;
+                        
+                        pos1 -= correctionVect * invM1;
+                        pos2 += correctionVect * invM2;
+                        
+                        // collision management
+                        sf::Vector2f dVel = vel2 - vel1;
+                        float dotProd = dot(dVel, n);
+
+                        if (dotProd < 0.f) { 
+                            float e = balls.restitutions[pair.id1] * balls.restitutions[pair.id2];
+                            float J = -(1.f + e) * dotProd * invSumInvMass;
+                            
+                            sf::Vector2f Jn = J * n;
+                            
+                            vel1 -= Jn * invM1;
+                            vel2 += Jn * invM2;
+                        }
+                    }
+                }
+
+                // border collisions
+                for (int i = 0; i < nBalls; i++) {
+                    sf::Vector2f& pos = balls.positions[i];
+                    sf::Vector2f& vel = balls.velocities[i];
+                    float radius = balls.treeElts[i].radius;
+                    float pRadius = radius * mToPx;
+                    float rest = balls.restitutions[i];
+                    
+                    // getting the positions (IN METERS converted to PIXELS)
+                    sf::Vector2f pxPos = pos * mToPx;
+                    
+                    bool posChanged = false;
+                    if (pxPos.x < pRadius + windowPos.x) {
+                        pxPos.x = pRadius + windowPos.x;
+                        posChanged = true;
+                    } else if (pxPos.x > size.x - pRadius + windowPos.x) {
+                        pxPos.x = size.x - pRadius + windowPos.x;
+                        posChanged = true;
+                    }
+                    if (pxPos.y < pRadius + windowPos.y)  {
+                        pxPos.y = pRadius + windowPos.y;
+                        posChanged = true;
+                    } else if (pxPos.y > size.y - pRadius + windowPos.y) {
+                        pxPos.y = size.y - pRadius + windowPos.y;
+                        posChanged = true;
+                    }
+                    
+                    // setting the positions IN METERS
+                    if (posChanged) {
+                        balls.positions[i] = pxPos * pxToM;
                     }
                 }
             }
 
-            // border collisions
-            for (int i = 0; i < nBalls; i++) {
-                sf::Vector2f& pos = balls.positions[i];
-                sf::Vector2f& vel = balls.velocities[i];
-                float radius = balls.treeElts[i].radius;
-                float pRadius = radius * mToPx;
-                float rest = balls.restitutions[i];
-                
-                // getting the positions (IN METERS converted to PIXELS)
-                sf::Vector2f pxPos = pos * mToPx;
-                
-                bool posChanged = false;
-                if (pxPos.x < pRadius + windowPos.x) {
-                    pxPos.x = pRadius + windowPos.x;
-                    posChanged = true;
-                } else if (pxPos.x > size.x - pRadius + windowPos.x) {
-                    pxPos.x = size.x - pRadius + windowPos.x;
-                    posChanged = true;
-                }
-                if (pxPos.y < pRadius + windowPos.y)  {
-                    pxPos.y = pRadius + windowPos.y;
-                    posChanged = true;
-                } else if (pxPos.y > size.y - pRadius + windowPos.y) {
-                    pxPos.y = size.y - pRadius + windowPos.y;
-                    posChanged = true;
-                }
-                
-                // setting the positions IN METERS
-                if (posChanged) {
-                    balls.positions[i] = pxPos * pxToM;
-                }
-            }
+            // CLEAN THE EMTPY LEAFS AND BRANCHES!!!
+            ballTree.cleanup();
+
+            accumulator -= fixedDt;
         }
 
-        // CLEAN THE EMTPY LEAFS AND BRANCHES!!!
-        ballTree.cleanup();
 
         // graphics rendering
         if (renderClock.getElapsedTime().asSeconds() >= renderDt) {
