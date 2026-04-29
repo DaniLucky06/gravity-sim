@@ -12,11 +12,14 @@ const float G = 1.f;
 const float offset = .01f;
 float timeScale = 1.e0f;
 float fps = 60.f;
-const int subSteps = 4;
-const bool debugTimeOutput = false;
 
-const float minRest = .7f;
-const float maxRest = .7f;
+const int subSteps = 4;
+const int treeDepth = 6;
+const int maxEltPerNode = 3;
+const bool debugTimeOutput = true;
+
+const float minRest = 0.9f;
+const float maxRest = 0.9f;
 
 const float windowScale = .5f;
 const float FULLWIDTH = sf::VideoMode::getDesktopMode().size.x;
@@ -35,10 +38,10 @@ float pxToM = 1 / mToPx;
 int nBalls = 2000;
 
 // Radius params
-const float minR = 3.f;
-const float maxR = 10.f;
+const float minR = 5.f;
+const float maxR = 5.f;
 
-const float maxV = 0.e1f;
+const float maxV = 1.e0f;
 
 const float density = 1.e-1f;
 
@@ -123,7 +126,7 @@ int main(int, char**){
     float radius;
 
     // Initialize Quadtree
-    Quadtree ballTree(FULLWIDTH * pxToM, FULLHEIGHT * pxToM, 8, 4);
+    Quadtree ballTree(FULLWIDTH * pxToM, FULLHEIGHT * pxToM, treeDepth, maxEltPerNode);
 
     for (int i = 0; i < nBalls; i++) {
         ballTree.insert(balls.treeElts[i]);
