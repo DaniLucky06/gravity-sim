@@ -7,23 +7,23 @@
 #include "quadTree.hpp"
 // eventually add GLM for vector/matrix operations
 
-const float g = 9.806e-1f;
-const float G = 1.f;
-const float offset = .01f;
+float g = 9.806e-1f;
+float G = 1.f;
+float offset = .01f;
 float timeScale = 1.e0f;
 float fps = 60.f;
 
-const int subSteps = 4;
-const int treeDepth = 6;
-const int maxEltPerNode = 3;
-const bool debugTimeOutput = true;
+int subSteps = 4;
+int treeDepth = 6;
+int maxEltPerNode = 3;
+bool debugTimeOutput = true;
 
-const float minRest = 0.9f;
-const float maxRest = 0.9f;
+float minRest = 0.9f;
+float maxRest = 0.9f;
 
-const float windowScale = .5f;
-const float FULLWIDTH = sf::VideoMode::getDesktopMode().size.x;
-const float FULLHEIGHT = sf::VideoMode::getDesktopMode().size.y;
+float windowScale = .5f;
+float FULLWIDTH = sf::VideoMode::getDesktopMode().size.x;
+float FULLHEIGHT = sf::VideoMode::getDesktopMode().size.y;
 sf::Vector2u size(FULLWIDTH * windowScale, FULLHEIGHT * windowScale);
 bool mousePressed = false;
 
@@ -38,12 +38,12 @@ float pxToM = 1 / mToPx;
 int nBalls = 2000;
 
 // Radius params
-const float minR = 5.f;
-const float maxR = 5.f;
+float minR = 5.f;
+float maxR = 5.f;
 
-const float maxV = 1.e0f;
+float maxV = 1.e0f;
 
-const float density = 1.e-1f;
+float density = 1.e-1f;
 
 struct Balls {
     std::vector<float> masses;
@@ -102,7 +102,47 @@ float norm(sf::Vector2f vec);
 float dot(sf::Vector2f V1, sf::Vector2f V2);
 bool comp(const sf::Vector2f& v1, const sf::Vector2f& v2);
 
-int main(int, char**){
+void parseArguments(int argc, char* argv[]) {
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        
+        if (arg == "-h" || arg == "--help") {
+            std::cout << "Usage: gravity-sim [options]\n"
+                      << "Options:\n"
+                      << "  --nBalls <int>       Number of balls (default: 2000)\n"
+                      << "  --g <float>          Gravity (default: 9.806)\n"
+                      << "  --G <float>          Mouse gravity constant (default: 1.0)\n"
+                      << "  --minR <float>       Minimum radius in pixels (default: 3.0)\n"
+                      << "  --maxR <float>       Maximum radius in pixels (default: 10.0)\n"
+                      << "  --maxV <float>       Maximum initial velocity (default: 0.0)\n"
+                      << "  --density <float>    Ball density (default: 10.0)\n"
+                      << "  --subSteps <int>     Physics sub-steps (default: 4)\n"
+                      << "  --timeScale <float>  Time scale multiplier (default: 1.0)\n"
+                      << "  --minRest <float>    Minimum restitution (default: 0.7)\n"
+                      << "  --maxRest <float>    Maximum restitution (default: 0.7)\n"
+                      << "  --scale <float>      Window scale (default: 0.5)\n"
+                      << "  --debug              Enable console debug output\n";
+            exit(0);
+        }
+        else if (arg == "--nBalls" && i + 1 < argc) nBalls = std::stoi(argv[++i]);
+        else if (arg == "--g" && i + 1 < argc) g = std::stof(argv[++i]);
+        else if (arg == "--G" && i + 1 < argc) G = std::stof(argv[++i]);
+        else if (arg == "--minR" && i + 1 < argc) minR = std::stof(argv[++i]);
+        else if (arg == "--maxR" && i + 1 < argc) maxR = std::stof(argv[++i]);
+        else if (arg == "--maxV" && i + 1 < argc) maxV = std::stof(argv[++i]);
+        else if (arg == "--density" && i + 1 < argc) density = std::stof(argv[++i]);
+        else if (arg == "--subSteps" && i + 1 < argc) subSteps = std::stoi(argv[++i]);
+        else if (arg == "--timeScale" && i + 1 < argc) timeScale = std::stof(argv[++i]);
+        else if (arg == "--minRest" && i + 1 < argc) minRest = std::stof(argv[++i]);
+        else if (arg == "--maxRest" && i + 1 < argc) maxRest = std::stof(argv[++i]);
+        else if (arg == "--scale" && i + 1 < argc) windowScale = std::stof(argv[++i]);
+        else if (arg == "--debug") debugTimeOutput = true;
+    }
+}
+
+int main(int argc, char* argv[]){
+    parseArguments(argc, argv);
+
     sf::RenderWindow window(sf::VideoMode({size.x, size.y}), "Bawls");
     sf::View fixedView(sf::FloatRect({0.f, 0.f}, {static_cast<float>(size.x), static_cast<float>(size.y)}));
     window.setView(fixedView);
