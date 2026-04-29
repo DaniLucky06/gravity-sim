@@ -10,7 +10,7 @@
 const float g = 9.806;
 const float G = 1.f;
 const float offset = .01f;
-float timeScale = 1.e0f;
+float timeScale = 1.e-4f;
 float fps = 60.f;
 const int subSteps = 4;
 const bool debugTimeOutput = false;
@@ -23,47 +23,64 @@ const float FULLWIDTH = sf::VideoMode::getDesktopMode().size.x;
 const float FULLHEIGHT = sf::VideoMode::getDesktopMode().size.y;
 sf::Vector2u size(FULLWIDTH * windowScale, FULLHEIGHT * windowScale);
 bool mousePressed = false;
+
+// EVERYTHING IN METERS. FOR GRAPHICS CALCULATIONS, THE VALUES ARE CONVERTED!!!
+// METRIC AND PIXEL SYSTEM START WITH 0 IN TOP LEFT OF --- MONITOR ---, NOT WINDOW
+
 // meters to pixels conversion
 float mToPx = FULLHEIGHT / 2;
 float pxToM = 1 / mToPx;
 
 // Number of balls
 int nBalls = 200;
+
+// Radius params
 const float minR = 20.f;
 const float maxR = 20.f;
+
 const float maxV = 1.f;
+
 const float density = 10.f;
 
 struct Balls {
-    std::vector<float> radiuses;
     std::vector<float> masses;
     std::vector<float> restitutions;
     std::vector<sf::Color> colors;
     std::vector<sf::Vector2f> positions;
     std::vector<sf::Vector2f> velocities;
     std::vector<sf::CircleShape> circles;
+    std::vector<QuadElt> treeElts;
 
     void randomInit(sf::Window& window, int n, float minR, float maxR, float maxV, float density, float minRest, float maxRest) {
-        radiuses.resize(n);
         masses.resize(n);
         colors.resize(n);
         positions.resize(n);
         velocities.resize(n);
         circles.resize(n);
         restitutions.resize(n);
+        treeElts.resize(n);
         
         srand(time(0));
         float fRAND_MAX = static_cast<float>(RAND_MAX);
         for (int i = 0; i < n; i++) {
             float radius = (rand() / fRAND_MAX * (maxR - minR)) + minR;
-            radiuses[i] = radius;
+            radius *= pxToM;
+
             masses[i] = radius * radius * M_PI * density;
+
             // sf::Color color(rand()%256, rand()%256, rand()%256, rand()%256);
+            
             sf::Color color(255, 255, 255, 255);
             colors[i] = color;
+
             float X = rand() / fRAND_MAX;
             float Y = rand() / fRAND_MAX;
-            positions[i] = (sf::Vector2f((X*(size.x - 2*radius) + radius), (Y*(size.y - 2*radius) + radius)) + static_cast<sf::Vector2f>(window.getPosition())) * pxToM;
+            X = (X * (static_cast<float>(size.x) - 2 * radius) + window.getPosition().x) * pxToM;
+            Y = (Y * (static_cast<float>(size.y) - 2 * radius) + window.getPosition().y) * pxToM;
+            positions[i] = {X, Y};
+            treeElts[i] = QuadElt(radius, X, Y);
+            treeElts[i].objId = i;
+
             velocities[i] = sf::Vector2f((rand()/fRAND_MAX*2.f - 1)*maxV, (rand()/fRAND_MAX*2.f - 1)*maxV);
             restitutions[i] = (rand() / fRAND_MAX) * (maxRest - minRest) + minRest;
 
@@ -74,7 +91,6 @@ struct Balls {
         }
     }
 };
-
 
 sf::Vector2f findAccel(const sf::Vector2f& cPos);
 float norm(sf::Vector2f vec);
@@ -104,6 +120,13 @@ int main(int, char**){
     sf::Vector2f pxPos;
     float radius;
 
+    // Initialize Quadtree
+    Quadtree ballTree(size.x * pxToM, size.y * pxToM, 5, 3);
+    for (int i = 0; i < nBalls; i++) {
+        ballTree.insert(balls.treeElts[i]);
+    }
+    
+
     while (window.isOpen())
     {
         // Process events
@@ -127,8 +150,12 @@ int main(int, char**){
         float subDt = dt / subSteps;
         physicsTicks++;
         
-        // physics
+        // Physics and tree update
         for (int i = 0; i < nBalls; i++) {
+            // remove from tree to update (reinsert at the end of the iteration)
+            ballTree.remove(balls.treeElts[i]);
+
+            // Update position and velocity
             sf::Vector2f pos = balls.positions[i];
             sf::Vector2f vel = balls.velocities[i];
             
@@ -137,111 +164,122 @@ int main(int, char**){
             pos += vHalf * dt;
             acc = findAccel(pos);
             vel = vHalf + 0.5f * acc * dt;
-            
+
+            // border velocity reflection logic
+            float radius = balls.treeElts[i].radius;
+            sf::Vector2f pPos = pos * mToPx;
+            float rest = balls.restitutions[i];
+
+            if (pPos.x < radius + windowPos.x || pPos.x > size.x - radius + windowPos.x) {
+                vel.x = -vel.x * rest;
+            }
+            if (pPos.y < radius + windowPos.y || pPos.y > size.y - radius + windowPos.y) {
+                vel.y = -vel.y * rest;
+            }
+
+            // updating in balls
             balls.positions[i] = pos;
             balls.velocities[i] = vel;
+
+            // bounding box and ball element update
+            balls.treeElts[i].cx = pos.x;
+            balls.treeElts[i].cy = pos.y;
+            balls.treeElts[i].minX = pos.x - radius;
+            balls.treeElts[i].maxX = pos.x + radius;
+            balls.treeElts[i].minY = pos.y - radius;
+            balls.treeElts[i].maxY = pos.y + radius;
+
+            // re-insertion in tree
+            ballTree.insert(balls.treeElts[i]);
         }
 
+        // broad collisions from tree
+        std::vector<Quadtree::CollisionData> pairs = ballTree.getCollisions();
+
+        // fine collisions with substepping
         for (int step = 0; step < subSteps; step++) {
+            // ball collisions
+            for (const auto& pair: pairs) {
+                // radiuses
+                const float r1 = balls.treeElts[pair.id1].radius;
+                const float r2 = balls.treeElts[pair.id2].radius;
+                const float radDist = r1 + r2;
 
-            // collisions
-            for (int i = 0; i < nBalls; i++) {
-                /* // color management [old]
-                std::vector<sf::Vector2f>::iterator maxIt = std::max_element(balls.velocities.begin(), balls.velocities.end(), comp);
-                float maxVel = norm(*maxIt);
-                float c = 255 * norm(vel) / maxVel;
-                balls.colors[i] = sf::Color(255, c, c, 255);
-                balls.circles[i].setFillColor(balls.colors[i]);
-                */
+                // masses
+                const float invM1 = 1.0f / balls.masses[pair.id1];
+                const float invM2 = 1.0f / balls.masses[pair.id2];
 
-                // ball collisions
-                float r1 = balls.radiuses[i] * pxToM;
-                float invM1 = 1.0f / balls.masses[i];
-                float rest1 = balls.restitutions[i];
+                // positions
+                sf::Vector2f& pos1 = balls.positions[pair.id1];
+                sf::Vector2f& pos2 = balls.positions[pair.id2];
+                sf::Vector2f& vel1 = balls.velocities[pair.id1];
+                sf::Vector2f& vel2 = balls.velocities[pair.id2];
 
-                sf::Vector2f& p1 = balls.positions[i]; 
-                sf::Vector2f& v1 = balls.velocities[i];
+                sf::Vector2f dPos = pos2 - pos1;
+                float distSq = dPos.lengthSquared();
 
-                for (int j = i + 1; j < nBalls; j++) {
-                    sf::Vector2f& p2 = balls.positions[j];
-                    sf::Vector2f& v2 = balls.velocities[j];
-
-                    float dx = p2.x - p1.x;
-                    float dy = p2.y - p1.y;
-                    float distSq = dx * dx + dy * dy;
+                if (distSq < radDist * radDist && distSq > 0.00001f) {
+                    float distance = std::sqrt(distSq);
+                    float invDist = 1.0f / distance;
                     
-                    float r2 = balls.radiuses[j] * pxToM;
-                    float radDist = r1 + r2;
+                    sf::Vector2f n = dPos * invDist;
+                    
+                    float invSumInvMass = 1 / (invM1 + invM2);
 
-                    if (distSq < radDist * radDist && distSq > 0.00001f) {
-                        float distance = std::sqrt(distSq);
-                        float invDist = 1.0f / distance;
-                        
-                        float nx = dx * invDist;
-                        float ny = dy * invDist;
-                        
-                        float invM2 = 1.0f / balls.masses[j];
-                        float sumInvMass = invM1 + invM2;
+                    // distancing
+                    float overlap = radDist - distance;
+                    float correction = overlap * invSumInvMass;
+                    sf::Vector2f correctionVect = n * correction;
+                    
+                    pos1 -= correctionVect * invM1;
+                    pos2 += correctionVect * invM2;
+                    
+                    // collision management
+                    sf::Vector2f dVel = vel2 - vel1;
+                    float dotProd = dot(dVel, n);
 
-                        // distancing
-                        float overlap = radDist - distance;
-                        float correction = overlap / sumInvMass;
-                        float cx = nx * correction;
-                        float cy = ny * correction;
+                    if (dotProd < 0.f) { 
+                        float e = balls.restitutions[pair.id1] * balls.restitutions[pair.id2];
+                        float J = -(1.f + e) * dotProd * invSumInvMass;
                         
-                        p1.x -= cx * invM1;
-                        p1.y -= cy * invM1;
-                        p2.x += cx * invM2;
-                        p2.y += cy * invM2;
+                        sf::Vector2f Jn = J * n;
                         
-                        // collision management
-                        float dvx = v2.x - v1.x;
-                        float dvy = v2.y - v1.y;
-                        float dotProd = dvx * nx + dvy * ny;
-
-                        if (dotProd < 0.f) { 
-                            float e = rest1 * balls.restitutions[j];
-                            float J = -(1.f + e) * dotProd / sumInvMass;
-                            
-                            float Jnx = J * nx;
-                            float Jny = J * ny;
-                            
-                            v1.x -= Jnx * invM1;
-                            v1.y -= Jny * invM1;
-                            v2.x += Jnx * invM2;
-                            v2.y += Jny * invM2;
-                        }
+                        vel1 -= Jn * invM1;
+                        vel2 -= Jn * invM2;
                     }
                 }
             }
 
             // border collisions
             for (int i = 0; i < nBalls; i++) {
-                sf::Vector2f& p = balls.positions[i];
-                sf::Vector2f& v = balls.velocities[i];
-                float radius = balls.radiuses[i];
+                sf::Vector2f& pos = balls.positions[i];
+                sf::Vector2f& vel = balls.velocities[i];
+                float radius = balls.treeElts[i].radius;
                 float rest = balls.restitutions[i];
                 
-                float px = p.x * mToPx;
-                float py = p.y * mToPx;
+                // getting the positions (IN METERS converted to PIXELS)
+                sf::Vector2f pxPos = pos * mToPx;
                 
-                if (px < radius + windowPos.x) {
-                    v.x = -v.x * rest;
-                    px = radius + windowPos.x;
-                } else if (px > size.x - radius + windowPos.x) {
-                    v.x = -v.x * rest;
-                    px = size.x - radius + windowPos.x;
+                bool posChanged = false;
+                if (pxPos.x < radius + windowPos.x) {
+                    pxPos.x = radius + windowPos.x;
+                    posChanged = true;
+                } else if (pxPos.x > size.x - radius + windowPos.x) {
+                    pxPos.x = size.x - radius + windowPos.x;
+                    posChanged = true;
                 }
-                if (py < radius + windowPos.y)  {
-                    v.y = -v.y * rest;
-                    py = radius + windowPos.y;
-                } else if (py > size.y - radius + windowPos.y) {
-                    v.y = -v.y * rest;
-                    py = size.y - radius + windowPos.y;
+                if (pxPos.y < radius + windowPos.y)  {
+                    pxPos.y = radius + windowPos.y;
+                    posChanged = true;
+                } else if (pxPos.y > size.y - radius + windowPos.y) {
+                    pxPos.y = size.y - radius + windowPos.y;
+                    posChanged = true;
                 }
                 
-                p.x = px * pxToM;
-                p.y = py * pxToM;
+                // setting the positions IN METERS
+                if (posChanged) {
+                    balls.positions[i] = pxPos * pxToM;
+                }
             }
         }
 
@@ -254,8 +292,10 @@ int main(int, char**){
             window.clear();
 
             for (int i = 0; i < nBalls; i++) {
-                pxPos = balls.positions[i] * mToPx;
-                balls.circles[i].setPosition({pxPos.x - static_cast<float>(windowPos.x), pxPos.y - static_cast<float>(windowPos.y)});
+                sf::Vector2f pxPos = balls.positions[i] * mToPx; 
+
+                balls.circles[i].setPosition(pxPos - static_cast<sf::Vector2f>(windowPos));
+                
                 window.draw(balls.circles[i]);
             }
 
@@ -274,6 +314,7 @@ int main(int, char**){
             metricsClock.restart();
         }
     }
+    return 0;
 }
 
 sf::Vector2f findAccel(const sf::Vector2f& cPos) {
