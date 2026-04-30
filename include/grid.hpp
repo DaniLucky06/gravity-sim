@@ -14,6 +14,8 @@ private:
     std::vector<FreeElement> data;
     int first_free; // The "head" of our invisible linked list
 public:
+    int length = 0;
+
     FreeList() {
         first_free = -1;
     };
@@ -25,6 +27,7 @@ public:
      * @return Index of the element you just inserted
      */
     int insert(const T& element) {
+        length++;
         if (first_free != -1) {
             // save free index
             const int index = first_free;
@@ -55,6 +58,7 @@ public:
     void erase (int index) {
         data[index].next = first_free;
         first_free = index;
+        length--;
     };
 
     /**
@@ -63,12 +67,13 @@ public:
     void clear () {
         data.clear();
         first_free = -1;
+        length = 0;
     };
 
     /**
-     * @brief Get the list size
+     * @brief Get the list range in memory
      * 
-     * @return List size as int
+     * @return Number of elements as int
      */
     int range() const {
         return static_cast<int>(data.size());
@@ -83,3 +88,38 @@ public:
     };
 };
 
+// The ball
+struct Element {
+    float radius;
+
+    // for grid
+    float cx, cy; // center pos
+};
+
+// reference to a ball, stored in the list
+struct ElementRef {
+    int ref;
+
+    int nextInCell = -1;
+};
+
+class Grid {
+    float xCellSize, yCellSize;
+    float invXCellSize, invYCellSize;
+    float width, height;
+
+    uint32_t xNum, yNum;
+
+    std::vector<uint32_t> cells;
+    std::vector<FreeList<ElementRef>> rowElements;
+    std::vector<uint32_t> elementsInRows;
+
+    FreeList<Element> elements;
+
+public:
+    Grid(float _width, float _height, uint32_t _xNum, uint32_t _yNum);
+
+    int insert(Element element);
+    void remove(int eltId);
+    void cleanup();
+};
