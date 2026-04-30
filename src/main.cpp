@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <SFML/Graphics.hpp>  
 
-#include "quadTree.hpp"
+#include "grid.hpp"
 // eventually add GLM for vector/matrix operations
 
 const float g = 9.806;
