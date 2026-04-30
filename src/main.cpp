@@ -2,19 +2,26 @@
 #include <cmath>
 #include <array>
 #include <algorithm>
-#include <SFML/Graphics.hpp>  
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <SFML/Graphics.hpp>
 
 #include "quadTree.hpp"
 // eventually add GLM for vector/matrix operations
+
+std::mutex stateMutex;
+std::atomic<bool> isRunning(true);
+
 
 float g = 9.806e0f;
 float G = 1.f;
 float offset = .01f;
 float timeScale = 1.e0f;
 float fps = 60.f;
-float fixedDt = 1.f / 10.f;
+float fixedDt = 0.00015f;
 
-int subSteps = 4;
+int subSteps = 1;
 int treeDepth = 6;
 int maxEltPerNode = 3;
 bool debugTimeOutput = false;
@@ -46,6 +53,8 @@ float maxV = 1.e0f;
 
 float density = 1.e-1f;
 bool gravityRadial = false;
+
+std::vector<sf::Vector2f> renderPositions(nBalls);
 
 struct Balls {
     std::vector<float> masses;
@@ -99,54 +108,15 @@ struct Balls {
     }
 };
 
+
 sf::Vector2f findAccel(const sf::Vector2f& cPos);
 float norm(sf::Vector2f vec);
 float dot(sf::Vector2f V1, sf::Vector2f V2);
 bool comp(const sf::Vector2f& v1, const sf::Vector2f& v2);
 
-void parseArguments(int argc, char* argv[]) {
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        
-        if (arg == "-h" || arg == "--help") {
-            std::cout << "Usage: gravity-sim [options]\n"
-                      << "Options:\n"
-                      << "  --nBalls <int>       Number of balls (default: 2000)\n"
-                      << "  --g <float>          Gravity (default: 9.806)\n"
-                      << "  --G <float>          Mouse gravity constant (default: 1.0)\n"
-                      << "  --rMin <float>       Minimum radius in pixels (default: 5.0)\n"
-                      << "  --rMax <float>       Maximum radius in pixels (default: 5.0)\n"
-                      << "  --rFix <float>       Uniform radius in pixels\n"
-                      << "  --maxV <float>       Maximum initial velocity (default: 0.0)\n"
-                      << "  --density <float>    Ball density (default: 10.0)\n"
-                      << "  --subSteps <int>     Physics sub-steps (default: 4)\n"
-                      << "  --timeScale <float>  Time scale multiplier (default: 1.0)\n"
-                      << "  --restMin <float>    Minimum restitution (default: 0.7)\n"
-                      << "  --restMax <float>    Maximum restitution (default: 0.7)\n"
-                      << "  --restMax <float>    Uniform restitution\n"
-                      << "  --scale <float>      Window scale (default: 0.5)\n"
-                      << "  --g-radial           Gravity mode radial\n"
-                      << "  --debug              Enable console debug output\n";
-            exit(0);
-        }
-        else if (arg == "--nBalls" && i + 1 < argc) nBalls = std::stoi(argv[++i]);
-        else if (arg == "--g" && i + 1 < argc) g = std::stof(argv[++i]);
-        else if (arg == "--G" && i + 1 < argc) G = std::stof(argv[++i]);
-        else if (arg == "--rMin" && i + 1 < argc) minR = std::stof(argv[++i]);
-        else if (arg == "--rMax" && i + 1 < argc) maxR = std::stof(argv[++i]);
-        else if (arg == "--rFix" && i + 1 < argc) {maxR = std::stof(argv[++i]); minR = maxR;}
-        else if (arg == "--maxV" && i + 1 < argc) maxV = std::stof(argv[++i]);
-        else if (arg == "--density" && i + 1 < argc) density = std::stof(argv[++i]);
-        else if (arg == "--subSteps" && i + 1 < argc) subSteps = std::stoi(argv[++i]);
-        else if (arg == "--timeScale" && i + 1 < argc) timeScale = std::stof(argv[++i]);
-        else if (arg == "--restMin" && i + 1 < argc) minRest = std::stof(argv[++i]);
-        else if (arg == "--restMax" && i + 1 < argc) maxRest = std::stof(argv[++i]);
-        else if (arg == "--restFix" && i + 1 < argc) {maxRest = std::stof(argv[++i]); minRest = maxRest;}
-        else if (arg == "--scale" && i + 1 < argc) windowScale = std::stof(argv[++i]);
-        else if (arg == "--g-radial") gravityRadial = true;
-        else if (arg == "--debug") debugTimeOutput = true;
-    }
-}
+void parseArguments(int argc, char* argv[]);
+
+void physicsThreadFunc(Balls& balls, Quadtree& ballTree, sf::RenderWindow& window);
 
 int main(int argc, char* argv[]){
     parseArguments(argc, argv);
@@ -154,13 +124,13 @@ int main(int argc, char* argv[]){
     sf::RenderWindow window(sf::VideoMode({size.x, size.y}), "Bawls");
     sf::View fixedView(sf::FloatRect({0.f, 0.f}, {static_cast<float>(size.x), static_cast<float>(size.y)}));
     window.setView(fixedView);
+    window.setFramerateLimit(fps);
     sf::Vector2i windowPos = window.getPosition();
 
     Balls balls{};
     balls.randomInit(window, nBalls, minR, maxR, maxV, density, minRest, maxRest);
 
     // time
-    sf::Clock clock;
     sf::Clock renderClock;
     
     float renderDt = 1.f / fps;
@@ -180,8 +150,8 @@ int main(int argc, char* argv[]){
         ballTree.insert(balls.treeElts[i]);
     }
     
+    std::thread physicsThread(physicsThreadFunc, std::ref(balls), std::ref(ballTree), std::ref(window));
 
-    float accumulator = 0.f;
     while (window.isOpen())
     {
         // Process events
@@ -203,16 +173,132 @@ int main(int argc, char* argv[]){
         }
 
         sf::Vector2i windowPos = window.getPosition();
+        
+        window.clear();
+        
+        // graphics rendering
+        // lock mutex
+        {
+            std::lock_guard<std::mutex> lock(stateMutex);
+            for (int i = 0; i < nBalls; i++) {
+                sf::Vector2f pxPos = renderPositions[i] * mToPx;
+
+                balls.circles[i].setPosition(pxPos - static_cast<sf::Vector2f>(windowPos));
+                
+                window.draw(balls.circles[i]);
+            }
+
+            window.display();
+        }
+
+        if (metricsClock.getElapsedTime().asSeconds() >= 1.0f && debugTimeOutput) {
+            std::cout << "FPS: " << renderFrames
+                      << " | Physics Ticks (UPS): " << physicsTicks 
+                      << " | Rapporto: " << (float)physicsTicks / renderFrames << " calcoli per frame\n";
+            
+            // Resetta i contatori per il secondo successivo
+            physicsTicks = 0;
+            renderFrames = 0;
+            metricsClock.restart();
+        }
+    }
+
+    isRunning = false;
+    physicsThread.join();
+    return 0;
+}
+
+sf::Vector2f findAccel(const sf::Vector2f& cPos) {
+    if (gravityRadial && mousePressed) {
+        sf::Vector2f mousePos = static_cast<sf::Vector2f>(sf::Mouse::getPosition()) * pxToM;
+        float dx = cPos.x - mousePos.x;
+        float dy = cPos.y - mousePos.y;
+        float dSqr = dx * dx + dy * dy;
+        float acc = G / (dSqr + offset);
+        float d = std::sqrt(dSqr + offset);
+        return sf::Vector2f(-dx*acc/d, -dy*acc/d);
+    } else if (gravityRadial) {
+        return sf::Vector2f(0.f, 0.f);
+    }
+
+    return sf::Vector2f(0.f, g);
+}
+
+float norm(sf::Vector2f vec) {
+    return sqrt(vec.x * vec.x + vec.y * vec.y);
+}
+
+bool comp(const sf::Vector2f& v1, const sf::Vector2f& v2) {
+    return norm(v1) < norm(v2);
+}
+
+float dot(sf::Vector2f V1, sf::Vector2f V2) {
+    return V1.x * V2.x + V1.y * V2.y;
+}
+
+void parseArguments(int argc, char* argv[]) {
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        
+        if (arg == "-h" || arg == "--help") {
+            std::cout << "Usage: gravity-sim [options]\n"
+                      << "Options:\n"
+                      << "  --nBalls <int>       Number of balls (default: 2000)\n"
+                      << "  --g <float>          Gravity (default: 9.806)\n"
+                      << "  --G <float>          Mouse gravity constant (default: 1.0)\n"
+                      << "  --rMin <float>       Minimum radius in pixels (default: 5.0)\n"
+                      << "  --rMax <float>       Maximum radius in pixels (default: 5.0)\n"
+                      << "  --rFix <float>       Uniform radius in pixels\n"
+                      << "  --maxV <float>       Maximum initial velocity (default: 0.0)\n"
+                      << "  --density <float>    Ball density (default: 10.0)\n"
+                      << "  --subSteps <int>     Physics sub-steps (default: 1)\n"
+                      << "  --timeScale <float>  Time scale multiplier (default: 1.0)\n"
+                      << "  --physicsDt <float>  Fixed physics delta-time (default: 1.0)\n"
+                      << "  --restMin <float>    Minimum restitution (default: 0.7)\n"
+                      << "  --restMax <float>    Maximum restitution (default: 0.7)\n"
+                      << "  --restMax <float>    Uniform restitution\n"
+                      << "  --scale <float>      Window scale (default: 0.5)\n"
+                      << "  --g-radial           Gravity mode radial\n"
+                      << "  --debug              Enable console debug output\n";
+            exit(0);
+        }
+        else if (arg == "--nBalls" && i + 1 < argc) nBalls = std::stoi(argv[++i]);
+        else if (arg == "--g" && i + 1 < argc) g = std::stof(argv[++i]);
+        else if (arg == "--G" && i + 1 < argc) G = std::stof(argv[++i]);
+        else if (arg == "--rMin" && i + 1 < argc) minR = std::stof(argv[++i]);
+        else if (arg == "--rMax" && i + 1 < argc) maxR = std::stof(argv[++i]);
+        else if (arg == "--rFix" && i + 1 < argc) {maxR = std::stof(argv[++i]); minR = maxR;}
+        else if (arg == "--maxV" && i + 1 < argc) maxV = std::stof(argv[++i]);
+        else if (arg == "--density" && i + 1 < argc) density = std::stof(argv[++i]);
+        else if (arg == "--subSteps" && i + 1 < argc) subSteps = std::stoi(argv[++i]);
+        else if (arg == "--timeScale" && i + 1 < argc) timeScale = std::stof(argv[++i]);
+        else if (arg == "--physicsDt" && i + 1 < argc) fixedDt = std::stof(argv[++i]);
+        else if (arg == "--restMin" && i + 1 < argc) minRest = std::stof(argv[++i]);
+        else if (arg == "--restMax" && i + 1 < argc) maxRest = std::stof(argv[++i]);
+        else if (arg == "--restFix" && i + 1 < argc) {maxRest = std::stof(argv[++i]); minRest = maxRest;}
+        else if (arg == "--scale" && i + 1 < argc) windowScale = std::stof(argv[++i]);
+        else if (arg == "--g-radial") gravityRadial = true;
+        else if (arg == "--debug") debugTimeOutput = true;
+    }
+}
+
+void physicsThreadFunc(Balls& balls, Quadtree& ballTree, sf::RenderWindow& window) {
+    sf::Clock clock;
+    
+    float accumulator = 0.f;
+    
+    while (isRunning) {
+        sf::Vector2i windowPos = window.getPosition();
         float frameTime = clock.restart().asSeconds() * timeScale;
+        if (frameTime > 1.f / fps) frameTime = 1.f / fps;
 
         accumulator += frameTime;
         
         while (accumulator >= fixedDt) {
-            physicsTicks++;
+            ballTree.clear();
             // Physics and tree update
             for (int i = 0; i < nBalls; i++) {
                 // remove from tree to update (reinsert at the end of the iteration)
-                ballTree.remove(balls.treeElts[i]);
 
                 // Update position and velocity
                 sf::Vector2f pos = balls.positions[i];
@@ -344,69 +430,20 @@ int main(int argc, char* argv[]){
                 }
             }
 
-            // CLEAN THE EMTPY LEAFS AND BRANCHES!!!
-            ballTree.cleanup();
-
             accumulator -= fixedDt;
         }
 
+        // CLEAN THE EMTPY LEAFS AND BRANCHES!!!
+        ballTree.cleanup();
 
-        // graphics rendering
-        if (renderClock.getElapsedTime().asSeconds() >= renderDt) {
-            renderFrames++;
-
-            window.clear();
-
+        // lock mutex when updating render vector
+        {
+            std::lock_guard<std::mutex> lock(stateMutex);
             for (int i = 0; i < nBalls; i++) {
-                sf::Vector2f pxPos = balls.positions[i] * mToPx; 
-
-                balls.circles[i].setPosition(pxPos - static_cast<sf::Vector2f>(windowPos));
-                
-                window.draw(balls.circles[i]);
+                renderPositions[i] = balls.positions[i];
             }
-
-            window.display();
-            renderClock.restart();
         }
 
-        if (metricsClock.getElapsedTime().asSeconds() >= 1.0f && debugTimeOutput) {
-            std::cout << "FPS: " << renderFrames
-                      << " | Physics Ticks (UPS): " << physicsTicks 
-                      << " | Rapporto: " << (float)physicsTicks / renderFrames << " calcoli per frame\n";
-            
-            // Resetta i contatori per il secondo successivo
-            physicsTicks = 0;
-            renderFrames = 0;
-            metricsClock.restart();
-        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    return 0;
-}
-
-sf::Vector2f findAccel(const sf::Vector2f& cPos) {
-    if (gravityRadial && mousePressed) {
-        sf::Vector2f mousePos = static_cast<sf::Vector2f>(sf::Mouse::getPosition()) * pxToM;
-        float dx = cPos.x - mousePos.x;
-        float dy = cPos.y - mousePos.y;
-        float dSqr = dx * dx + dy * dy;
-        float acc = G / (dSqr + offset);
-        float d = std::sqrt(dSqr + offset);
-        return sf::Vector2f(-dx*acc/d, -dy*acc/d);
-    } else if (gravityRadial) {
-        return sf::Vector2f(0.f, 0.f);
-    }
-
-    return sf::Vector2f(0.f, g);
-}
-
-float norm(sf::Vector2f vec) {
-    return sqrt(vec.x * vec.x + vec.y * vec.y);
-}
-
-bool comp(const sf::Vector2f& v1, const sf::Vector2f& v2) {
-    return norm(v1) < norm(v2);
-}
-
-float dot(sf::Vector2f V1, sf::Vector2f V2) {
-    return V1.x * V2.x + V1.y * V2.y;
 }

@@ -189,6 +189,8 @@ public:
      */
     void cleanup();
 
+    void clear();
+
     /**
      * @brief Get all possible collisions
      * 

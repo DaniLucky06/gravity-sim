@@ -2,11 +2,9 @@
 
 
 Quadtree::Quadtree(float width, float height, int depth, int elementsPerLeaf) {
-    // 1. Initialize your max_depth and max_elements_per_leaf.
     maxDepth = depth;
     maxElementsPerLeaf = elementsPerLeaf;
 
-    // 2. Set your free_node to -1 (no recycled nodes yet).
     freeNode = -1;
 
     // Init the root rect
@@ -15,7 +13,8 @@ Quadtree::Quadtree(float width, float height, int depth, int elementsPerLeaf) {
     root_rect.mx = root_rect.hx;
     root_rect.my = root_rect.hy;
 
-    // 4. THE TRICKY PART: Initialize the root node.
+    nodes.reserve(50000);
+
     nodes.push_back({-1, 0});
 }
 
@@ -296,6 +295,16 @@ void Quadtree::cleanup () {
             node.count = 0;
         }
     }
+}
+
+void Quadtree::clear() {
+    nodes.resize(1);
+    nodes[0].first_child = -1;
+    nodes[0].count = 0;
+    
+    freeNode = -1;
+    
+    eltNodes = FreeList<QuadEltNode>(); 
 }
 
 std::vector<Quadtree::CollisionData> Quadtree::getCollisions() {
