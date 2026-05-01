@@ -98,7 +98,7 @@ struct Element {
     float mass;
     float rest;
     float vx, vy;
-    sf::Color color;
+    uint32_t color;
     
 
     // for grid
@@ -107,9 +107,9 @@ struct Element {
 
 // reference to a ball, stored in the list
 struct ElementRef {
-    int ref;
+    uint32_t ref;
 
-    int nextInCell = -1;
+    int nextInCell;
 };
 
 /**
@@ -138,28 +138,28 @@ public:
      * @param element The element to add
      * @return Index to the element in the grid's list
      */
-    int addElement(Element element);
+    uint32_t addElement(Element element);
 
     /**
      * @brief Insert an element into the grid structure
      * 
      * @param eltId The index of the element to insert
      */
-    void insert(int eltId);
+    void insert(uint32_t eltId);
 
     /**
      * @brief Remove element from the grid cells (for moving the element)
      * 
      * @param eltId Index of the element to remove
      */
-    void remove(int eltId);
+    void remove(uint32_t eltId);
 
     /**
      * @brief Remove an element from the `elements` list. RUN `remove()` FIRST!
      * 
      * @param eltId Index of the element to remove
      */
-    void eraseElement(int eltId);
+    void eraseElement(uint32_t eltId);
 
     /**
      * @brief Cleanup the grid: de-allocate empty rows

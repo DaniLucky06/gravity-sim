@@ -15,11 +15,11 @@ Grid::Grid(float _width, float _height, uint32_t _xNum, uint32_t _yNum):
 	rowElements(yNum)
 {};
 
-int Grid::addElement(Element element) {
-	int eltId = elements.insert(element);
+uint32_t Grid::addElement(Element element) {
+	return elements.insert(element);
 };
 
-void Grid::insert(int eltId) {
+void Grid::insert(uint32_t eltId) {
     // index of element in elements list
 	Element& element = elements[eltId];
 
@@ -29,15 +29,15 @@ void Grid::insert(int eltId) {
     float top    = element.cy - r;
     float bottom = element.cy + r;
     
-    int minRow = static_cast<int>(   top * invYCellSize);
-    int maxRow = static_cast<int>(bottom * invYCellSize);
+	int minRow = std::max(0, static_cast<int>(top * invYCellSize));
+	int maxRow = std::min(static_cast<int>(yNum - 1), static_cast<int>(bottom * invYCellSize));
 
-    int minCol = static_cast<int>(  left * invXCellSize);
-    int maxCol = static_cast<int>( right * invXCellSize);
+	int minCol = std::max(0, static_cast<int>(left * invXCellSize));
+	int maxCol = std::min(static_cast<int>(xNum - 1), static_cast<int>(right * invXCellSize));
 
     // insert in necessary cells
-    for (int row = minRow; row < maxRow; row++) { // rows
-        for (int col = minCol; col < maxCol; col++) { // columns
+    for (int row = minRow; row <= maxRow; row++) { // rows
+        for (int col = minCol; col <= maxCol; col++) { // columns
             // check if there are already elements in that cell
             if (cells[row] == -1) {
                 // no elements, add the current one to the references in this cell
@@ -59,7 +59,7 @@ void Grid::insert(int eltId) {
     }
 };
 
-void Grid::remove(int eltId) {
+void Grid::remove(uint32_t eltId) {
 	// index of element in elements list
     Element& element = elements[eltId];
 
@@ -69,15 +69,15 @@ void Grid::remove(int eltId) {
     float top    = element.cy - r;
     float bottom = element.cy + r;
     
-    int minRow = static_cast<int>(   top * invYCellSize);
-    int maxRow = static_cast<int>(bottom * invYCellSize);
+	int minRow = std::max(0, static_cast<int>(top * invYCellSize));
+	int maxRow = std::min(static_cast<int>(yNum - 1), static_cast<int>(bottom * invYCellSize));
 
-    int minCol = static_cast<int>(  left * invXCellSize);
-    int maxCol = static_cast<int>( right * invXCellSize);
+	int minCol = std::max(0, static_cast<int>(left * invXCellSize));
+	int maxCol = std::min(static_cast<int>(xNum - 1), static_cast<int>(right * invXCellSize));
 
     // remove from necessary cells
-    for (int row = minRow; row < maxRow; row++) { // rows
-        for (int col = minCol; col < maxCol; col++) { // columns
+    for (int row = minRow; row <= maxRow; row++) { // rows
+        for (int col = minCol; col <= maxCol; col++) { // columns
             // check if there are no elements in this cell (commented becaouse the element has to be in it)
             // if (cells[row] == -1) continue;
 
@@ -107,7 +107,7 @@ void Grid::remove(int eltId) {
 					rowElements[row][prevRefId].nextInCell = eltRef.nextInCell;
 				} else {
 					// FIRST -> set cell to contain the next element reference
-					cells[row * yNum + col] = eltRef.nextInCell;
+					cells[row * xNum + col] = eltRef.nextInCell;
 				}
 
 				rowElements[row].erase(cellRefId);
@@ -120,7 +120,7 @@ void Grid::remove(int eltId) {
 	// elements.erase(eltId);
 }
 
-void Grid::eraseElement(int eltId) {
+void Grid::eraseElement(uint32_t eltId) {
 	elements.erase(eltId);
 };
 

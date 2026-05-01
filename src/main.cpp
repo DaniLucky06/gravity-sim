@@ -108,6 +108,7 @@ void parseArguments(int argc, char* argv[]);
 sf::RenderWindow window(sf::VideoMode({windowSize.x, windowSize.y}), "Bawls");
 int main(int argc, char* argv[]) {
     parseArguments(argc, argv);
+    elementInit();
 
     sf::View fixedView(sf::FloatRect({0.f, 0.f}, {static_cast<float>(windowSize.x), static_cast<float>(windowSize.y)}));
     window.setView(fixedView);
@@ -197,7 +198,8 @@ int main(int argc, char* argv[]) {
             if (render) {
                 sf::CircleShape circle(radius, 20);
                 circle.setPosition(sf::Vector2f({px, py}) - static_cast<sf::Vector2f>(windowPos));
-                circle.setFillColor(element.color);
+                sf::Color color(element.color);
+                circle.setFillColor(color);
 
                 window.draw(circle);
             }
@@ -228,7 +230,7 @@ int main(int argc, char* argv[]) {
                     while (eltRefId2 != -1) {
                         ElementRef& eltRef2 = grid.rowElements[row][eltRefId2];
 
-                        collisionPairs.push_back((eltRef1.ref << 32) | eltRef2.ref); // insert a hash of the two indexes
+                        collisionPairs.push_back((static_cast<uint64_t>(eltRef1.ref) << 32) | eltRef2.ref); // insert a hash of the two indexes
 
                         eltRefId2 = eltRef2.nextInCell;
                     }
@@ -238,85 +240,87 @@ int main(int argc, char* argv[]) {
             }
         }
 
-        // ball collisions NARROW
-        std::sort(collisionPairs.begin(), collisionPairs.end());
-        // set previous collison pair to not be the first one
-        uint64_t previousCollisionPair = ~collisionPairs[0];
-        for (uint64_t collisionPair : collisionPairs) {
-            // skip if we already checked the collision
-            if (collisionPair == previousCollisionPair) continue;
+        if (!collisionPairs.empty()) {
+            // ball collisions NARROW
+            std::sort(collisionPairs.begin(), collisionPairs.end());
+            // set previous collison pair to not be the first one
+            uint64_t previousCollisionPair = ~collisionPairs[0];
+            for (uint64_t collisionPair : collisionPairs) {
+                // skip if we already checked the collision
+                if (collisionPair == previousCollisionPair) continue;
 
-            uint32_t ballId1 = static_cast<uint32_t>(collisionPair >> 32); // first ball index
-            uint32_t ballId2 = static_cast<uint32_t>(collisionPair & 0xFFFFFFFF); // second ball index
+                uint32_t ballId1 = static_cast<uint32_t>(collisionPair >> 32); // first ball index
+                uint32_t ballId2 = static_cast<uint32_t>(collisionPair & 0xFFFFFFFF); // second ball index
 
-            Element& ball1 = grid.elements[ballId1];
-            Element& ball2 = grid.elements[ballId2];
+                Element& ball1 = grid.elements[ballId1];
+                Element& ball2 = grid.elements[ballId2];
 
-            float dx = ball2.cx - ball1.cx;
-            float dy = ball2.cy - ball1.cy;
+                float dx = ball2.cx - ball1.cx;
+                float dy = ball2.cy - ball1.cy;
 
-            float r1 = ball1.radius;
-            float r2 = ball2.radius;
+                float r1 = ball1.radius;
+                float r2 = ball2.radius;
 
-            float distSq = dx * dx + dy * dy;
-            float radDist = r1 + r2;
+                float distSq = dx * dx + dy * dy;
+                float radDist = r1 + r2;
 
-            // skip to next pair if they don't collide
-            if (distSq >= radDist * radDist || distSq <= 0.00001f) {
+                // skip to next pair if they don't collide
+                if (distSq >= radDist * radDist || distSq <= 0.00001f) {
+                    previousCollisionPair = collisionPair;
+                    continue;
+                }
+
+                grid.remove(ballId1);
+                grid.remove(ballId2);
+
+                float distance = std::sqrt(distSq);
+                float invDist = 1.0f / distance;
+                
+                float nx = dx * invDist;
+                float ny = dy * invDist;
+                
+                float invM1 = 1.0f / ball1.mass;
+                float invM2 = 1.0f / ball2.mass;
+                float sumInvMass = invM1 + invM2;
+
+                // distancing
+                float overlap = radDist - distance;
+                float correction = overlap / sumInvMass;
+                float cx = nx * correction;
+                float cy = ny * correction;
+                
+                ball1.cx -= cx * invM1;
+                ball1.cy -= cy * invM1;
+                ball2.cx += cx * invM2;
+                ball2.cy += cy * invM2;
+                
+                // speed management
+                float dvx = ball2.vx - ball1.vx;
+                float dvy = ball2.vy - ball1.vy;
+                float dotProd = dvx * nx + dvy * ny;
+
+                // if they are going apart, don't change their velocities
+                if (dotProd >= 0.f) {
+                    previousCollisionPair = collisionPair;
+                    continue;
+                }
+
+                float e = ball1.rest * ball2.rest;
+                float J = -(1.f + e) * dotProd / sumInvMass;
+                
+                float Jnx = J * nx;
+                float Jny = J * ny;
+                
+                ball1.vx -= Jnx * invM1;
+                ball1.vy -= Jny * invM1;
+                ball2.vx += Jnx * invM2;
+                ball2.vy += Jny * invM2;
+
                 previousCollisionPair = collisionPair;
-                continue;
             }
-
-            grid.remove(ballId1);
-            grid.remove(ballId2);
-
-            float distance = std::sqrt(distSq);
-            float invDist = 1.0f / distance;
-            
-            float nx = dx * invDist;
-            float ny = dy * invDist;
-            
-            float invM1 = 1.0f / ball1.mass;
-            float invM2 = 1.0f / ball2.mass;
-            float sumInvMass = invM1 + invM2;
-
-            // distancing
-            float overlap = radDist - distance;
-            float correction = overlap / sumInvMass;
-            float cx = nx * correction;
-            float cy = ny * correction;
-            
-            ball1.cx -= cx * invM1;
-            ball1.cy -= cy * invM1;
-            ball2.cx += cx * invM2;
-            ball2.cy += cy * invM2;
-            
-            // speed management
-            float dvx = ball2.vx - ball1.vx;
-            float dvy = ball2.vy - ball1.vy;
-            float dotProd = dvx * nx + dvy * ny;
-
-            // if they are going apart, don't change their velocities
-            if (dotProd >= 0.f) {
-                previousCollisionPair = collisionPair;
-                continue;
-            }
-
-            float e = ball1.rest * ball2.rest;
-            float J = -(1.f + e) * dotProd / sumInvMass;
-            
-            float Jnx = J * nx;
-            float Jny = J * ny;
-            
-            ball1.vx -= Jnx * invM1;
-            ball1.vy -= Jny * invM1;
-            ball2.vx += Jnx * invM2;
-            ball2.vy += Jny * invM2;
-
-            previousCollisionPair = collisionPair;
         }
 
-
+        collisionPairs.clear();
 
         if (metricsClock.getElapsedTime().asSeconds() >= 1.0f && debugTimeOutput) {
             std::cout << "FPS: " << renderFrames
@@ -340,7 +344,8 @@ void elementInit() {
         float mass = radius * radius * M_PI * density;
 
         // sf::Color color(rand()%256, rand()%256, rand()%256, rand()%256);
-        sf::Color color(255, 255, 255, 255);
+        // sf::Color color(255, 255, 255, 255);
+        uint32_t color = 0xFFFFFFFF;
 
         float X = rand() / fRAND_MAX;
         float Y = rand() / fRAND_MAX;
