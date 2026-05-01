@@ -51,11 +51,15 @@ float gridMult = 1.f;
 float maxV = 1.e0f;
 
 float density = 1.e-1f;
+
+float mouseInfluenceSqr = (100.f * pxToM) * (100.f * pxToM);
+float mouseInfluence = std::sqrt(mouseInfluenceSqr);
 bool gravityRadial = false;
 bool sortDuplication = false;
 
 const int xNum = std::ceil(FULLWIDTHPX / (gridMult * 2 * maxR));
 const int yNum = std::ceil(FULLHEIGHTPX / (gridMult * 2 * maxR));
+sf::Vector2f mousePos;
 
 Grid grid(FULLWIDTH, FULLHEIGHT, xNum, yNum);
 
@@ -75,9 +79,15 @@ sf::RenderWindow window(sf::VideoMode({windowSize.x, windowSize.y}), "Bawls");
 int main(int argc, char* argv[]) {
     parseArguments(argc, argv);
     elementInit();
-
+    
     sf::View fixedView(sf::FloatRect({0.f, 0.f}, {static_cast<float>(windowSize.x), static_cast<float>(windowSize.y)}));
     window.setView(fixedView);
+
+    sf::CircleShape mouseCircle(mouseInfluence * mToPx, 30);
+    mouseCircle.setOutlineColor(sf::Color::Red);
+    mouseCircle.setOutlineThickness(-3);
+    mouseCircle.setFillColor(sf::Color::Transparent);
+    mouseCircle.setOrigin({mouseInfluence * mToPx, mouseInfluence * mToPx});
     
     // time
     sf::Clock clock;
@@ -110,11 +120,14 @@ int main(int argc, char* argv[]) {
                 if (mousePressedEvent->button == sf::Mouse::Button::Left) mousePressed = !mousePressed;
             }
         }
-
+        
         sf::Vector2i windowPos = window.getPosition();
         
         bool render = renderClock.getElapsedTime().asSeconds() >= ms;
-        if (render) window.clear();
+        if (render) {
+            window.clear();
+            if (mousePressed) mousePos = static_cast<sf::Vector2f>(sf::Mouse::getPosition()) * pxToM;
+        }
 
         grid.clear();
 
@@ -186,8 +199,11 @@ int main(int argc, char* argv[]) {
 
         if (render) {
             renderFrames++;
+            if (mousePressed) {mouseCircle.setPosition(mousePos * mToPx - static_cast<sf::Vector2f>(windowPos)); window.draw(mouseCircle);}
+
             window.display();
             renderClock.restart();
+
         }
 
         // ball collisions BROAD
@@ -285,7 +301,7 @@ int main(int argc, char* argv[]) {
             std::cout << "FPS: " << renderFrames
                       << " | Physics Ticks (UPS): " << physicsTicks / renderTick
                       << "/s | Rapporto: " << (float)physicsTicks / renderFrames
-                      << " calcoli per frame | Time scale: " << physicsTicks * fixedDt << "\n";
+                      << " calcoli per frame | Time scale: " << physicsTicks * fixedDt / renderTick << "\n";
 
             physStorage.push_back(physicsTicks / renderTick);
             perfStorage.push_back((float)physicsTicks / renderFrames);
@@ -328,15 +344,20 @@ void elementInit() {
 
 sf::Vector2f findAccel(const sf::Vector2f& cPos) {
     if (gravityRadial && mousePressed) {
-        sf::Vector2f mousePos = static_cast<sf::Vector2f>(sf::Mouse::getPosition()) * pxToM;
         float dx = cPos.x - mousePos.x;
         float dy = cPos.y - mousePos.y;
         float dSqr = dx * dx + dy * dy;
+
+        if (dSqr > mouseInfluenceSqr) return sf::Vector2f(0.f, g);
+        
         float acc = G / (dSqr + offset);
-        float d = std::sqrt(dSqr + offset);
-        return sf::Vector2f(-dx*acc/d, -dy*acc/d);
+
+        sf::Vector2f n = {dx, dy};
+        n /= std::sqrt(dSqr);
+
+        return (-n) * acc;
     } else if (gravityRadial) {
-        return sf::Vector2f(0.f, 0.f);
+        return sf::Vector2f(0.f, g);
     }
 
     return sf::Vector2f(0.f, g);
@@ -379,6 +400,7 @@ void parseArguments(int argc, char* argv[]) {
                       << "  --restMax <float>    Maximum restitution (default: 0.7)\n"
                       << "  --restFix <float>    Uniform restitution\n"
                       << "  --scale <float>      Window scale (default: 0.5)\n"
+                      << "  --mouseSize <float>  Maximum mouse pull-in radius in pixels (default: 100)\n"
                       << "  --g-radial           Gravity mode radial\n"
                       << "  --sort               Sort the collisionPairs array for de-duplication\n"
                       << "  --debug              Enable console debug output\n";
@@ -400,6 +422,8 @@ void parseArguments(int argc, char* argv[]) {
         else if (arg == "--restMax" && i + 1 < argc) maxRest = std::stof(argv[++i]);
         else if (arg == "--restFix" && i + 1 < argc) {maxRest = std::stof(argv[++i]); minRest = maxRest;}
         else if (arg == "--scale" && i + 1 < argc) windowScale = std::stof(argv[++i]);
+        else if (arg == "--mouseSize" && i + 1 < argc) {mouseInfluence = (std::stof(argv[++i]) * pxToM);
+                                                        mouseInfluenceSqr = mouseInfluence * mouseInfluence;}
         else if (arg == "--g-radial") gravityRadial = true;
         else if (arg == "--sort") sortDuplication = true;
         else if (arg == "--debug") debugTimeOutput = true;
