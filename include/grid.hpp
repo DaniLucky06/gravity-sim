@@ -109,8 +109,10 @@ struct Element {
 struct ElementRef {
     uint32_t ref;
 
-    int nextInCell;
+    uint32_t nextInCell;
 };
+
+constexpr uint32_t INVALID_REF = 0xFFFFFFFF;
 
 /**
  * Grid class to efficiently manage elements stored in a grid.
@@ -165,4 +167,9 @@ public:
      * @brief Cleanup the grid: de-allocate empty rows
      */
     void cleanup();
+
+    /**
+     * @brief Clear the grid (not the elements list)
+     */
+    void clear();
 };

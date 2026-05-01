@@ -36,5 +36,12 @@
 ehthumbs.db
 Thumbs.db
 
-*build*
+# Build folders #
+#################
+build*
 out
+
+# Performance reports #
+#######################
+*perf*
+*.data

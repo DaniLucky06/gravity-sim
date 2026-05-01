@@ -39,7 +39,7 @@ float FULLWIDTH = FULLWIDTHPX * pxToM;
 float FULLHEIGHT = FULLHEIGHTPX * pxToM;
 
 // Number of balls
-int nBalls = 2000;
+int nBalls = 10;
 
 // Radius params
 float minR = 5.f;
@@ -50,58 +50,16 @@ float maxV = 1.e0f;
 float density = 1.e-1f;
 bool gravityRadial = false;
 
-struct Balls {
-    std::vector<float> radiuses;
-    std::vector<float> masses;
-    std::vector<float> restitutions;
-    std::vector<sf::Color> colors;
-    std::vector<sf::Vector2f> positions;
-    std::vector<sf::Vector2f> velocities;
-    std::vector<sf::CircleShape> circles;
+const int xNum = std::ceil(FULLWIDTHPX / (1.5 * 2 * maxR));
+const int yNum = std::ceil(FULLHEIGHTPX / (1.5 * 2 * maxR));
 
-    void randomInit(sf::Window& window, int n, float minR, float maxR, float maxV, float density, float minRest, float maxRest) {
-        radiuses.resize(n);
-        masses.resize(n);
-        colors.resize(n);
-        positions.resize(n);
-        velocities.resize(n);
-        circles.resize(n);
-        restitutions.resize(n);
-        
-        srand(time(0));
-        float fRAND_MAX = static_cast<float>(RAND_MAX);
-        for (int i = 0; i < n; i++) {
-            float radius = (rand() / fRAND_MAX * (maxR - minR)) + minR;
-            radiuses[i] = radius;
-            masses[i] = radius * radius * M_PI * density;
-            // sf::Color color(rand()%256, rand()%256, rand()%256, rand()%256);
-            sf::Color color(255, 255, 255, 255);
-            colors[i] = color;
-            float X = rand() / fRAND_MAX;
-            float Y = rand() / fRAND_MAX;
-            positions[i] = (sf::Vector2f((X*(windowSize.x - 2*radius) + radius), (Y*(windowSize.y - 2*radius) + radius)) + static_cast<sf::Vector2f>(window.getPosition())) * pxToM;
-            velocities[i] = sf::Vector2f((rand()/fRAND_MAX*2.f - 1)*maxV, (rand()/fRAND_MAX*2.f - 1)*maxV);
-            restitutions[i] = (rand() / fRAND_MAX) * (maxRest - minRest) + minRest;
-
-            // update circles
-            circles[i].setRadius(radius);
-            circles[i].setFillColor(color);
-            circles[i].setOrigin({radius, radius});
-        }
-    }
-};
-
-const int xNum = std::ceil(FULLWIDTH / (2 * maxR));
-const int yNum = std::ceil(FULLHEIGHT / (2 * maxR));
-
-Grid grid(FULLWIDTHPX, FULLHEIGHTPX, xNum, yNum);
+Grid grid(FULLWIDTH, FULLHEIGHT, xNum, yNum);
 
 void elementInit();
 sf::Vector2f findAccel(const sf::Vector2f& cPos);
 
 float norm(sf::Vector2f vec);
-float dot(sf::Vector2f V1, sf::Vector2f V2);
-bool comp(const sf::Vector2f& v1, const sf::Vector2f& v2);
+float dot(sf::Vector2f v1, sf::Vector2f v2);
 
 void parseArguments(int argc, char* argv[]);
 
@@ -198,6 +156,7 @@ int main(int argc, char* argv[]) {
             if (render) {
                 sf::CircleShape circle(radius, 20);
                 circle.setPosition(sf::Vector2f({px, py}) - static_cast<sf::Vector2f>(windowPos));
+                circle.setOrigin({radius, radius});
                 sf::Color color(element.color);
                 circle.setFillColor(color);
 
@@ -209,32 +168,38 @@ int main(int argc, char* argv[]) {
             grid.elements[i].vx = vel.x;
             grid.elements[i].vy = vel.y;
             grid.insert(i);
+            physicsTicks++;
         }
 
         if (render) {
+            renderFrames++;
             window.display();
             renderClock.restart();
         }
 
         // ball collisions BROAD
         for (int row = 0; row < grid.yNum; row++) {
+            if (grid.rowElements[row].length == 0) continue;
             for (int col = 0; col < grid.xNum; col++) {
                 uint32_t eltRefId1 = grid.cells[row * xNum + col];
 
                 // loop until we reach the last element in the cell
-                while (eltRefId1 != -1) {
+                while (eltRefId1 != INVALID_REF) {
                     ElementRef& eltRef1 = grid.rowElements[row][eltRefId1];
                     uint32_t eltRefId2 = eltRef1.nextInCell;
                     
                     // if eltRefId
-                    while (eltRefId2 != -1) {
+                    while (eltRefId2 != INVALID_REF) {
                         ElementRef& eltRef2 = grid.rowElements[row][eltRefId2];
 
-                        collisionPairs.push_back((static_cast<uint64_t>(eltRef1.ref) << 32) | eltRef2.ref); // insert a hash of the two indexes
+                        if (eltRef1.ref <= eltRef2.ref) {
+                            collisionPairs.push_back((static_cast<uint64_t>(eltRef1.ref) << 32) | eltRef2.ref); // insert a hash of the two indexes
+                        } else {
+                            collisionPairs.push_back((static_cast<uint64_t>(eltRef2.ref) << 32) | eltRef1.ref); // insert a hash of the two indexes
+                        }
 
                         eltRefId2 = eltRef2.nextInCell;
                     }
-
                     eltRefId1 = eltRef1.nextInCell;
                 }
             }
@@ -293,6 +258,9 @@ int main(int argc, char* argv[]) {
                 ball1.cy -= cy * invM1;
                 ball2.cx += cx * invM2;
                 ball2.cy += cy * invM2;
+
+                grid.insert(ballId1);
+                grid.insert(ballId2);
                 
                 // speed management
                 float dvx = ball2.vx - ball1.vx;
@@ -300,7 +268,7 @@ int main(int argc, char* argv[]) {
                 float dotProd = dvx * nx + dvy * ny;
 
                 // if they are going apart, don't change their velocities
-                if (dotProd >= 0.f) {
+                if (dotProd > 0.f) {
                     previousCollisionPair = collisionPair;
                     continue;
                 }
@@ -341,6 +309,7 @@ void elementInit() {
 
     for (int i = 0; i < nBalls; i++) {
         float radius = (rand() / fRAND_MAX * (maxR - minR)) + minR;
+        radius *= pxToM;
         float mass = radius * radius * M_PI * density;
 
         // sf::Color color(rand()%256, rand()%256, rand()%256, rand()%256);
@@ -350,8 +319,8 @@ void elementInit() {
         float X = rand() / fRAND_MAX;
         float Y = rand() / fRAND_MAX;
 
-        float cx = (X*(windowSize.x - 2*radius) + radius) + window.getPosition().x * pxToM;
-        float cy = (Y*(windowSize.y - 2*radius) + radius) + window.getPosition().y * pxToM;
+        float cx = ((X*(windowSize.x - 2*radius) + radius) + window.getPosition().x) * pxToM;
+        float cy = ((Y*(windowSize.y - 2*radius) + radius) + window.getPosition().y) * pxToM;
         float vx = (rand()/fRAND_MAX*2.f - 1)*maxV;
         float vy = (rand()/fRAND_MAX*2.f - 1)*maxV;
         float rest = (rand() / fRAND_MAX) * (maxRest - minRest) + minRest;
@@ -381,10 +350,6 @@ float norm(sf::Vector2f vec) {
     return sqrt(vec.x * vec.x + vec.y * vec.y);
 }
 
-bool comp(const sf::Vector2f& v1, const sf::Vector2f& v2) {
-    return norm(v1) < norm(v2);
-}
-
 float dot(sf::Vector2f V1, sf::Vector2f V2) {
     return V1.x * V2.x + V1.y * V2.y;
 }
@@ -407,9 +372,10 @@ void parseArguments(int argc, char* argv[]) {
                       << "  --subSteps <int>     Physics sub-steps (default: 1)\n"
                       << "  --timeScale <float>  Time scale multiplier (default: 1.0)\n"
                       << "  --physicsDt <float>  Fixed physics delta-time (default: 1.0)\n"
+                      << "  --fps <float>        Fps (default: 60.0)\n"
                       << "  --restMin <float>    Minimum restitution (default: 0.7)\n"
                       << "  --restMax <float>    Maximum restitution (default: 0.7)\n"
-                      << "  --restMax <float>    Uniform restitution\n"
+                      << "  --restFix <float>    Uniform restitution\n"
                       << "  --scale <float>      Window scale (default: 0.5)\n"
                       << "  --g-radial           Gravity mode radial\n"
                       << "  --debug              Enable console debug output\n";
@@ -426,6 +392,7 @@ void parseArguments(int argc, char* argv[]) {
         else if (arg == "--subSteps" && i + 1 < argc) subSteps = std::stoi(argv[++i]);
         else if (arg == "--timeScale" && i + 1 < argc) timeScale = std::stof(argv[++i]);
         else if (arg == "--physicsDt" && i + 1 < argc) fixedDt = std::stof(argv[++i]);
+        else if (arg == "--fps" && i + 1 < argc) {fps = std::stof(argv[++i]); ms = 1.f / fps;}
         else if (arg == "--restMin" && i + 1 < argc) minRest = std::stof(argv[++i]);
         else if (arg == "--restMax" && i + 1 < argc) maxRest = std::stof(argv[++i]);
         else if (arg == "--restFix" && i + 1 < argc) {maxRest = std::stof(argv[++i]); minRest = maxRest;}
