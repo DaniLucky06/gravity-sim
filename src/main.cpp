@@ -52,7 +52,7 @@ float maxV = 1.e0f;
 
 float density = 1.e-1f;
 bool gravityRadial = false;
-bool sortDuplication = true;
+bool sortDuplication = false;
 
 const int xNum = std::ceil(FULLWIDTHPX / (gridMult * 2 * maxR));
 const int yNum = std::ceil(FULLHEIGHTPX / (gridMult * 2 * maxR));
@@ -380,6 +380,7 @@ void parseArguments(int argc, char* argv[]) {
                       << "  --restFix <float>    Uniform restitution\n"
                       << "  --scale <float>      Window scale (default: 0.5)\n"
                       << "  --g-radial           Gravity mode radial\n"
+                      << "  --sort               Sort the collisionPairs array for de-duplication\n"
                       << "  --debug              Enable console debug output\n";
             exit(0);
         }
@@ -400,7 +401,7 @@ void parseArguments(int argc, char* argv[]) {
         else if (arg == "--restFix" && i + 1 < argc) {maxRest = std::stof(argv[++i]); minRest = maxRest;}
         else if (arg == "--scale" && i + 1 < argc) windowScale = std::stof(argv[++i]);
         else if (arg == "--g-radial") gravityRadial = true;
-        else if (arg == "--sort") sortDuplication = false;
+        else if (arg == "--sort") sortDuplication = true;
         else if (arg == "--debug") debugTimeOutput = true;
     }
 }
