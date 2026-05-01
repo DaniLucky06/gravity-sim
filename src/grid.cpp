@@ -12,13 +12,16 @@ Grid::Grid(float _width, float _height, uint32_t _xNum, uint32_t _yNum):
 
 	cells(xNum * yNum, static_cast<uint32_t>(-1)),
 	
-	rowElements(yNum),
-	elementsInRows(yNum)
+	rowElements(yNum)
 {};
 
-int Grid::insert(Element element) {
+int Grid::addElement(Element element) {
+	int eltId = elements.insert(element);
+};
+
+void Grid::insert(int eltId) {
     // index of element in elements list
-    int eltId = elements.insert(element);
+	Element& element = elements[eltId];
 
 	float r = element.radius;
 	float left   = element.cx - r;
@@ -54,7 +57,6 @@ int Grid::insert(Element element) {
             }
         }
     }
-    return eltId;
 };
 
 void Grid::remove(int eltId) {
@@ -99,8 +101,6 @@ void Grid::remove(int eltId) {
 				// --- if this runs, THIS (eltRef) is the element reference we're searching for ---
 				
 				
-				// check if there are more items in the cell, and if this is the first item
-				
 				// close gap in element reference links (if not first element)
 				if (prevRefId != -1) {
 					// NOT FIRST
@@ -116,13 +116,17 @@ void Grid::remove(int eltId) {
         }
     }
 	
-	// remove element from elements
-	elements.erase(eltId);
+	// remove element from elements (COMMENTED OUT BECAUSE OF OPTIMISATION TRY)
+	// elements.erase(eltId);
 }
+
+void Grid::eraseElement(int eltId) {
+	elements.erase(eltId);
+};
 
 void Grid::cleanup() {
 	// de-allocate empty rows
 	for (int i = 0; i < yNum; i++) {
-		if (rowElements[i].length == 0) rowElements[i].clear();
+		if (rowElements[i].length == 0 && !rowElements[i].cleared) rowElements[i].clear();
 	}
 };
