@@ -13,17 +13,18 @@ float offset = .01f;
 float timeScale = 1.e0f;
 float fps = 60.f;
 float ms = 1.f / fps;
-float fixedDt = 0.00015f;
+float fixedDt = 0.0005f;
 
 int subSteps = 1;
 int treeDepth = 6;
 int maxEltPerNode = 3;
 bool debugTimeOutput = false;
+float renderTick = 0.5f;
 
 float minRest = 0.9f;
 float maxRest = 0.9f;
 
-float windowScale = .5f;
+float windowScale = .75f;
 unsigned int FULLWIDTHPX = sf::VideoMode::getDesktopMode().size.x;
 unsigned int FULLHEIGHTPX = sf::VideoMode::getDesktopMode().size.y;
 sf::Vector2u windowSize(FULLWIDTHPX * windowScale, FULLHEIGHTPX * windowScale);
@@ -39,27 +40,34 @@ float FULLWIDTH = FULLWIDTHPX * pxToM;
 float FULLHEIGHT = FULLHEIGHTPX * pxToM;
 
 // Number of balls
-int nBalls = 10;
+int nBalls = 500;
 
 // Radius params
 float minR = 5.f;
 float maxR = 5.f;
 
+float gridMult = 1.f;
+
 float maxV = 1.e0f;
 
 float density = 1.e-1f;
 bool gravityRadial = false;
+bool sortDuplication = true;
 
-const int xNum = std::ceil(FULLWIDTHPX / (1.5 * 2 * maxR));
-const int yNum = std::ceil(FULLHEIGHTPX / (1.5 * 2 * maxR));
+const int xNum = std::ceil(FULLWIDTHPX / (gridMult * 2 * maxR));
+const int yNum = std::ceil(FULLHEIGHTPX / (gridMult * 2 * maxR));
 
 Grid grid(FULLWIDTH, FULLHEIGHT, xNum, yNum);
+
+std::vector<uint32_t> perfStorage;
+std::vector<uint32_t> physStorage;
 
 void elementInit();
 sf::Vector2f findAccel(const sf::Vector2f& cPos);
 
 float norm(sf::Vector2f vec);
 float dot(sf::Vector2f v1, sf::Vector2f v2);
+float mean(std::vector<uint32_t>& arr);
 
 void parseArguments(int argc, char* argv[]);
 
@@ -74,6 +82,7 @@ int main(int argc, char* argv[]) {
     // time
     sf::Clock clock;
     sf::Clock renderClock;
+
     
     sf::Clock metricsClock;
     int physicsTicks = 0;
@@ -88,7 +97,10 @@ int main(int argc, char* argv[]) {
         {
             // Close window: exit
             if (event->is<sf::Event::Closed>()) {
+                float meanPhysTicks = mean(physStorage);
+                if (debugTimeOutput) printf("\n ----------------------------------------- \n Mean Physics Ticks: %.0f/s | Time scale: %.4f\n", meanPhysTicks, (meanPhysTicks * fixedDt));
                 window.close();
+                return 0;
             } 
             else if (const auto* resized = event->getIf<sf::Event::Resized>()) {
                 windowSize = resized->size;
@@ -100,14 +112,15 @@ int main(int argc, char* argv[]) {
         }
 
         sf::Vector2i windowPos = window.getPosition();
-        float timePassed = clock.restart().asSeconds() * timeScale;
         
         bool render = renderClock.getElapsedTime().asSeconds() >= ms;
         if (render) window.clear();
 
+        grid.clear();
+
         // physics, graphics, border collisions
         for (int i = 0; i < nBalls; i++) {
-            grid.remove(i);
+            // grid.remove(i); REMOVED TO TRY GRID CLEAR
             Element& element = grid.elements[i];
 
             sf::Vector2f pos = {element.cx, element.cy};
@@ -168,8 +181,8 @@ int main(int argc, char* argv[]) {
             grid.elements[i].vx = vel.x;
             grid.elements[i].vy = vel.y;
             grid.insert(i);
-            physicsTicks++;
         }
+        physicsTicks++;
 
         if (render) {
             renderFrames++;
@@ -178,36 +191,11 @@ int main(int argc, char* argv[]) {
         }
 
         // ball collisions BROAD
-        for (int row = 0; row < grid.yNum; row++) {
-            if (grid.rowElements[row].length == 0) continue;
-            for (int col = 0; col < grid.xNum; col++) {
-                uint32_t eltRefId1 = grid.cells[row * xNum + col];
-
-                // loop until we reach the last element in the cell
-                while (eltRefId1 != INVALID_REF) {
-                    ElementRef& eltRef1 = grid.rowElements[row][eltRefId1];
-                    uint32_t eltRefId2 = eltRef1.nextInCell;
-                    
-                    // if eltRefId
-                    while (eltRefId2 != INVALID_REF) {
-                        ElementRef& eltRef2 = grid.rowElements[row][eltRefId2];
-
-                        if (eltRef1.ref <= eltRef2.ref) {
-                            collisionPairs.push_back((static_cast<uint64_t>(eltRef1.ref) << 32) | eltRef2.ref); // insert a hash of the two indexes
-                        } else {
-                            collisionPairs.push_back((static_cast<uint64_t>(eltRef2.ref) << 32) | eltRef1.ref); // insert a hash of the two indexes
-                        }
-
-                        eltRefId2 = eltRef2.nextInCell;
-                    }
-                    eltRefId1 = eltRef1.nextInCell;
-                }
-            }
-        }
+        grid.calculateCollisions(collisionPairs);
 
         if (!collisionPairs.empty()) {
             // ball collisions NARROW
-            std::sort(collisionPairs.begin(), collisionPairs.end());
+            if (sortDuplication) std::sort(collisionPairs.begin(), collisionPairs.end());
             // set previous collison pair to not be the first one
             uint64_t previousCollisionPair = ~collisionPairs[0];
             for (uint64_t collisionPair : collisionPairs) {
@@ -235,8 +223,10 @@ int main(int argc, char* argv[]) {
                     continue;
                 }
 
+                /* // REMOVED TO TRY GRID CLEAR
                 grid.remove(ballId1);
                 grid.remove(ballId2);
+                */
 
                 float distance = std::sqrt(distSq);
                 float invDist = 1.0f / distance;
@@ -259,8 +249,10 @@ int main(int argc, char* argv[]) {
                 ball2.cx += cx * invM2;
                 ball2.cy += cy * invM2;
 
+                /* // REMOVED TO TRY GRID CLEAR
                 grid.insert(ballId1);
                 grid.insert(ballId2);
+                */
                 
                 // speed management
                 float dvx = ball2.vx - ball1.vx;
@@ -289,11 +281,15 @@ int main(int argc, char* argv[]) {
         }
 
         collisionPairs.clear();
-
-        if (metricsClock.getElapsedTime().asSeconds() >= 1.0f && debugTimeOutput) {
+        if (metricsClock.getElapsedTime().asSeconds() >= renderTick && debugTimeOutput) {
             std::cout << "FPS: " << renderFrames
-                      << " | Physics Ticks (UPS): " << physicsTicks 
-                      << " | Rapporto: " << (float)physicsTicks / renderFrames << " calcoli per frame\n";
+                      << " | Physics Ticks (UPS): " << physicsTicks / renderTick
+                      << "/s | Rapporto: " << (float)physicsTicks / renderFrames
+                      << " calcoli per frame | Time scale: " << physicsTicks * fixedDt << "\n";
+
+            physStorage.push_back(physicsTicks / renderTick);
+            perfStorage.push_back((float)physicsTicks / renderFrames);
+
             
             // Resetta i contatori per il secondo successivo
             physicsTicks = 0;
@@ -354,6 +350,12 @@ float dot(sf::Vector2f V1, sf::Vector2f V2) {
     return V1.x * V2.x + V1.y * V2.y;
 }
 
+float mean(std::vector<uint32_t>& arr) {
+    float sum = 0.f;
+    for (uint32_t el : arr) sum += static_cast<float>(el);
+    return sum / arr.size();
+}
+
 void parseArguments(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -371,7 +373,7 @@ void parseArguments(int argc, char* argv[]) {
                       << "  --density <float>    Ball density (default: 10.0)\n"
                       << "  --subSteps <int>     Physics sub-steps (default: 1)\n"
                       << "  --timeScale <float>  Time scale multiplier (default: 1.0)\n"
-                      << "  --physicsDt <float>  Fixed physics delta-time (default: 1.0)\n"
+                      << "  --physicsDt <float>  Fixed physics delta-time (default: 0.0005)\n"
                       << "  --fps <float>        Fps (default: 60.0)\n"
                       << "  --restMin <float>    Minimum restitution (default: 0.7)\n"
                       << "  --restMax <float>    Maximum restitution (default: 0.7)\n"
@@ -398,6 +400,7 @@ void parseArguments(int argc, char* argv[]) {
         else if (arg == "--restFix" && i + 1 < argc) {maxRest = std::stof(argv[++i]); minRest = maxRest;}
         else if (arg == "--scale" && i + 1 < argc) windowScale = std::stof(argv[++i]);
         else if (arg == "--g-radial") gravityRadial = true;
+        else if (arg == "--sort") sortDuplication = false;
         else if (arg == "--debug") debugTimeOutput = true;
     }
 }

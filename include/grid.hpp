@@ -164,6 +164,13 @@ public:
     void eraseElement(uint32_t eltId);
 
     /**
+     * @brief Check all possible collision pairs (BROAD PHASE)
+     * 
+     * @param[out] collisionPairs Array to store the collision pairs in
+     */
+    void calculateCollisions(std::vector<uint64_t>& collisionPairs);
+
+    /**
      * @brief Cleanup the grid: de-allocate empty rows
      */
     void cleanup();
