@@ -1,7 +1,10 @@
 #include <iostream>
 #include <cmath>
-#include <array>
+#include <vector>
 #include <algorithm>
+#include <mutex>
+#include <queue>
+#include <thread>
 #include <SFML/Graphics.hpp>  
 
 #include "grid.hpp"
