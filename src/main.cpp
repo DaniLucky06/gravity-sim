@@ -48,7 +48,7 @@ float maxR = 5.f;
 
 float gridMult = 1.f;
 
-float maxV = 1.e0f;
+float maxVinit = 1.e0f;
 
 float density = 1.e-1f;
 
@@ -74,6 +74,10 @@ float dot(sf::Vector2f v1, sf::Vector2f v2);
 float mean(std::vector<uint32_t>& arr);
 
 void parseArguments(int argc, char* argv[]);
+
+float vMinSqr = 2.f;
+float vMaxSqr = 2.f;
+float invVMaxSqr = 1.f / vMaxSqr;
 
 sf::RenderWindow window(sf::VideoMode({windowSize.x, windowSize.y}), "Bawls");
 int main(int argc, char* argv[]) {
@@ -128,9 +132,10 @@ int main(int argc, char* argv[]) {
             window.clear();
             if (mousePressed) mousePos = static_cast<sf::Vector2f>(sf::Mouse::getPosition()) * pxToM;
         }
-
+        
         grid.clear();
-
+        
+        vMaxSqr = 0.f;
         // physics, graphics, border collisions
         for (int i = 0; i < nBalls; i++) {
             // grid.remove(i); REMOVED TO TRY GRID CLEAR
@@ -144,6 +149,10 @@ int main(int argc, char* argv[]) {
             pos += vHalf * fixedDt;
             acc = findAccel(pos);
             vel = vHalf + 0.5f * acc * fixedDt;
+
+            // update the max velocity
+            float vSqr = vel.length();
+            vMaxSqr = vSqr > vMaxSqr ? vSqr : vMaxSqr;
 
             // border collisions
             float radius = element.radius * mToPx;
@@ -183,6 +192,12 @@ int main(int argc, char* argv[]) {
                 sf::CircleShape circle(radius, 20);
                 circle.setPosition(sf::Vector2f({px, py}) - static_cast<sf::Vector2f>(windowPos));
                 circle.setOrigin({radius, radius});
+
+                // calculate ball color
+                float vNorm = vSqr * invVMaxSqr * 0xFF;
+                uint32_t red = vNorm <= 0xFF ? static_cast<uint32_t>(vSqr * invVMaxSqr * 0xFF) : 0xFF;
+                uint32_t blue = vNorm <= 0xFF ? static_cast<uint32_t>((1 - vSqr * invVMaxSqr) * 0xFF) : 0x00;
+                element.color = (red << 24) | ((blue & 0xFF) << 8) | 0x000000FF;
                 sf::Color color(element.color);
                 circle.setFillColor(color);
 
@@ -197,7 +212,9 @@ int main(int argc, char* argv[]) {
         }
         physicsTicks++;
 
+
         if (render) {
+            invVMaxSqr = 1 / vMaxSqr;
             renderFrames++;
             if (mousePressed) {mouseCircle.setPosition(mousePos * mToPx - static_cast<sf::Vector2f>(windowPos)); window.draw(mouseCircle);}
 
@@ -333,8 +350,8 @@ void elementInit() {
 
         float cx = ((X*(windowSize.x - 2*radius) + radius) + window.getPosition().x) * pxToM;
         float cy = ((Y*(windowSize.y - 2*radius) + radius) + window.getPosition().y) * pxToM;
-        float vx = (rand()/fRAND_MAX*2.f - 1)*maxV;
-        float vy = (rand()/fRAND_MAX*2.f - 1)*maxV;
+        float vx = (rand()/fRAND_MAX*2.f - 1)*maxVinit;
+        float vy = (rand()/fRAND_MAX*2.f - 1)*maxVinit;
         float rest = (rand() / fRAND_MAX) * (maxRest - minRest) + minRest;
         int eltId = grid.addElement({radius, mass, rest, vx, vy, color, cx, cy});
         grid.insert(eltId);
@@ -412,7 +429,7 @@ void parseArguments(int argc, char* argv[]) {
         else if (arg == "--rMin" && i + 1 < argc) minR = std::stof(argv[++i]);
         else if (arg == "--rMax" && i + 1 < argc) maxR = std::stof(argv[++i]);
         else if (arg == "--rFix" && i + 1 < argc) {maxR = std::stof(argv[++i]); minR = maxR;}
-        else if (arg == "--maxV" && i + 1 < argc) maxV = std::stof(argv[++i]);
+        else if (arg == "--maxV" && i + 1 < argc) maxVinit = std::stof(argv[++i]);
         else if (arg == "--density" && i + 1 < argc) density = std::stof(argv[++i]);
         else if (arg == "--subSteps" && i + 1 < argc) subSteps = std::stoi(argv[++i]);
         else if (arg == "--timeScale" && i + 1 < argc) timeScale = std::stof(argv[++i]);
