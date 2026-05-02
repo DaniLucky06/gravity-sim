@@ -8,6 +8,7 @@
 #include <SFML/Graphics.hpp>  
 
 #include "grid.hpp"
+#include "threadManager.hpp"
 // eventually add GLM for vector/matrix operations
 
 float g = 9.806e0f;
@@ -71,6 +72,7 @@ std::vector<uint32_t> physStorage;
 
 void elementInit();
 sf::Vector2f findAccel(const sf::Vector2f& cPos);
+void threadTask();
 
 float norm(sf::Vector2f vec);
 float dot(sf::Vector2f v1, sf::Vector2f v2);
@@ -227,7 +229,32 @@ int main(int argc, char* argv[]) {
         }
 
         // ball collisions BROAD
-        grid.calculateCollisions(collisionPairs);
+        for (int row = 0; row < yNum; row++) {
+		if (grid.rowElements[row].length == 0) continue;
+		for (int col = 0; col < xNum; col++) {
+			uint32_t eltRefId1 = grid.cells[row * xNum + col];
+
+			// loop until we reach the last element in the cell
+			while (eltRefId1 != INVALID_REF) {
+				ElementRef& eltRef1 = grid.rowElements[row][eltRefId1];
+				uint32_t eltRefId2 = eltRef1.nextInCell;
+				
+				// if eltRefId
+				while (eltRefId2 != INVALID_REF) {
+					ElementRef& eltRef2 = grid.rowElements[row][eltRefId2];
+
+					if (eltRef1.ref <= eltRef2.ref) {
+						collisionPairs.push_back((static_cast<uint64_t>(eltRef1.ref) << 32) | eltRef2.ref); // insert a hash of the two indexes
+					} else {
+						collisionPairs.push_back((static_cast<uint64_t>(eltRef2.ref) << 32) | eltRef1.ref); // insert a hash of the two indexes
+					}
+
+					eltRefId2 = eltRef2.nextInCell;
+				}
+				eltRefId1 = eltRef1.nextInCell;
+			}
+		}
+	}
 
         if (!collisionPairs.empty()) {
             // ball collisions NARROW
@@ -334,6 +361,12 @@ int main(int argc, char* argv[]) {
         }
     }
 }
+
+void threadTask() 
+{
+
+};
+
 
 void elementInit() {
     srand(time(0));

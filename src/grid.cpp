@@ -125,36 +125,6 @@ void Grid::eraseElement(uint32_t eltId) {
 	elements.erase(eltId);
 };
 
-void Grid::calculateCollisions(std::vector<uint64_t>& collisionPairs) {
-	for (int row = 0; row < yNum; row++) {
-		if (rowElements[row].length == 0) continue;
-		for (int col = 0; col < xNum; col++) {
-			uint32_t eltRefId1 = cells[row * xNum + col];
-
-			// loop until we reach the last element in the cell
-			while (eltRefId1 != INVALID_REF) {
-				ElementRef& eltRef1 = rowElements[row][eltRefId1];
-				uint32_t eltRefId2 = eltRef1.nextInCell;
-				
-				// if eltRefId
-				while (eltRefId2 != INVALID_REF) {
-					ElementRef& eltRef2 = rowElements[row][eltRefId2];
-
-					if (eltRef1.ref <= eltRef2.ref) {
-						collisionPairs.push_back((static_cast<uint64_t>(eltRef1.ref) << 32) | eltRef2.ref); // insert a hash of the two indexes
-					} else {
-						collisionPairs.push_back((static_cast<uint64_t>(eltRef2.ref) << 32) | eltRef1.ref); // insert a hash of the two indexes
-					}
-
-					eltRefId2 = eltRef2.nextInCell;
-				}
-				eltRefId1 = eltRef1.nextInCell;
-			}
-		}
-	}
-
-};
-
 void Grid::cleanup() {
 	// de-allocate empty rows
 	for (int i = 0; i < yNum; i++) {

@@ -168,7 +168,7 @@ public:
      * 
      * @param[out] collisionPairs Array to store the collision pairs in
      */
-    void calculateCollisions(std::vector<uint64_t>& collisionPairs);
+    // void calculateCollisions(std::vector<uint64_t>& collisionPairs);
 
     /**
      * @brief Cleanup the grid: de-allocate empty rows

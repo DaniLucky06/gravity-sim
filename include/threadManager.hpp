@@ -57,13 +57,13 @@ public:
     };
 
     template<typename F, typename... Args>
-    void enqueue(F&& f, Args&&... args) 
+    void enqueue(F&& task, Args&&... args) 
     {
         {
             std::unique_lock<std::mutex> lock(mtx);
-            tasks.emplace([task = std::forward<F>(task), args] 
+            tasks.emplace([task = std::forward<F>(task), args...] 
             {
-                task(args);
+                task(args...);
             });
         }
 
