@@ -64,13 +64,15 @@ const int xNum = std::ceil(FULLWIDTHPX / (gridMult * 2 * maxR));
 const int yNum = std::ceil(FULLHEIGHTPX / (gridMult * 2 * maxR));
 sf::Vector2f mousePos;
 
-Grid grid(FULLWIDTH, FULLHEIGHT, xNum, yNum);
+Grid grid(FULLWIDTH, FULLHEIGHT, xNum, yNum, nBalls);
 
 std::vector<uint32_t> perfStorage;
 std::vector<uint32_t> physStorage;
 
 void elementInit();
 sf::Vector2f findAccel(const sf::Vector2f& cPos);
+inline void collisionCheck(Element& elt1, Element& elt2);
+
 
 void physicsTask(uint32_t startIdx, uint32_t endIdx, sf::Vector2i windowPos);
 void collisionTask(uint32_t startRowIdx, uint32_t endRowIdx, uint8_t j);
@@ -144,8 +146,6 @@ int main(int argc, char* argv[]) {
             if (mousePressed) mousePos = static_cast<sf::Vector2f>(sf::Mouse::getPosition()) * pxToM;
         }
         
-        grid.clear();
-        
         // physics, graphics, border collisions
         vMaxSqr = 0.f;
 
@@ -156,10 +156,12 @@ int main(int argc, char* argv[]) {
             threadpool.enqueue(physicsTask, startIdx, endIdx, windowPos);
         }
         threadpool.waitFinished();
+
+        // fill the grid
+        grid.build();
         
         for (size_t i = 0; i < nBalls; i++) {
             Element& element = grid.elements[i];
-            grid.insert(i);
             // update the max velocity
             float vSqr = norm({element.vx, element.vy});
             if (vSqr > vMaxSqr) vMaxSqr = vSqr;
@@ -199,14 +201,12 @@ int main(int argc, char* argv[]) {
         
         // ball collisions
         uint32_t rowsPerThread = (grid.yNum + maxCollThreads - 1) / maxCollThreads;
-        for (uint8_t j = 0; j < 4; j++) {
+        for (uint8_t j = 0; j < 2; j++) {
             for (uint32_t t = 0; t < maxCollThreads; t++) {
                 uint32_t startRowIdx = t * rowsPerThread;
                 uint32_t endRowIdx = std::min(grid.yNum, startRowIdx + rowsPerThread);
                 
-                uint8_t rowPhase = j / 2;
-                if ((startRowIdx % 2) != rowPhase) startRowIdx++;
-                
+                startRowIdx += j % 2;
                 // Prevent out-of-bounds if the phase shift pushes it over the edge
                 if (startRowIdx >= grid.yNum) continue;
                 
@@ -239,6 +239,8 @@ void physicsTask(uint32_t startIdx, uint32_t endIdx, sf::Vector2i windowPos)
         // grid.remove(i); REMOVED TO TRY GRID CLEAR
         Element& element = grid.elements[i];
 
+        if (element.mass <= 0.00001f) continue;
+
         sf::Vector2f pos = {element.cx, element.cy};
         sf::Vector2f vel = {element.vx, element.vy};
         
@@ -257,23 +259,23 @@ void physicsTask(uint32_t startIdx, uint32_t endIdx, sf::Vector2i windowPos)
         float py = pos.y * mToPx;
         
         if (px < radius + windowPos.x) {
-            if (vel.x < 0) vel.x = -vel.x * rest;
+            if (vel.x < 0) vel.x = -vel.x;
             vel.x *= rest;
 
             px = radius + windowPos.x;
         } else if (px > windowSize.x - radius + windowPos.x) {
-            if (vel.x > 0) vel.x = -vel.x * rest;
+            if (vel.x > 0) vel.x = -vel.x;
             vel.x *= rest;
 
             px = windowSize.x - radius + windowPos.x;
         }
         if (py < radius + windowPos.y)  {
-            if (vel.y < 0) vel.y = -vel.y * rest;
+            if (vel.y < 0) vel.y = -vel.y;
             vel.y *= rest;
 
             py = radius + windowPos.y;
         } else if (py > windowSize.y - radius + windowPos.y) {
-            if (vel.y > 0) vel.y = -vel.y * rest;
+            if (vel.y > 0) vel.y = -vel.y;
             vel.y *= rest;
 
             py = windowSize.y - radius + windowPos.y;
@@ -292,104 +294,50 @@ void physicsTask(uint32_t startIdx, uint32_t endIdx, sf::Vector2i windowPos)
 void collisionTask(uint32_t startRowIdx, uint32_t endRowIdx, uint8_t j) 
 {
     for (uint32_t row = startRowIdx; row < endRowIdx; row += 2) {
-        if (grid.rowElements[row].length == 0) continue;
-        
-        for (int col = j % 2; col < xNum; col += 2) {
-
-            uint32_t eltRefId1 = grid.cells[row * xNum + col];
-
-            // loop until we reach the last element in the cell
-            while (eltRefId1 != INVALID_REF) {
-                ElementRef& eltRef1 = grid.rowElements[row][eltRefId1];
-                uint32_t eltRefId2 = eltRef1.nextInCell;
+        for (uint32_t col = 0; col < grid.xNum; col++) {
+            uint32_t cellId = row * grid.xNum + col;
+            uint32_t startIdx = grid.cellStart[cellId];
+            
+            // Skip empty cells using the active counter
+            if (startIdx >= grid.activeParticleCount) continue;
+            
+            // Loop over all balls in THIS cell
+            for (uint32_t idx1 = startIdx; idx1 < grid.activeParticleCount && grid.indices[idx1].cellId == cellId; idx1++) {
+                Element& elt1 = grid.elements[grid.indices[idx1].ballId]; 
                 
-                // if eltRefId
-                while (eltRefId2 != INVALID_REF) {
-                    ElementRef& eltRef2 = grid.rowElements[row][eltRefId2];
+                // 1. Collisions inside the SAME cell
+                for (uint32_t idx2 = idx1 + 1; idx2 < grid.activeParticleCount && grid.indices[idx2].cellId == cellId; idx2++) {
+                    Element& elt2 = grid.elements[grid.indices[idx2].ballId];
 
-                    // Check the collision!
-
-                    uint32_t ballId1 = eltRef1.ref; // first ball index
-                    uint32_t ballId2 = eltRef2.ref; // second ball index
-
-                    Element& ball1 = grid.elements[ballId1];
-                    Element& ball2 = grid.elements[ballId2];
-
-                    float dx = ball2.cx - ball1.cx;
-                    float dy = ball2.cy - ball1.cy;
-
-                    float r1 = ball1.radius;
-                    float r2 = ball2.radius;
-
-                    float distSq = dx * dx + dy * dy;
-                    float radDist = r1 + r2;
-
-                    // skip to next pair if they don't collide
-                    if (distSq >= radDist * radDist || distSq <= 0.00001f) {
-                        eltRefId2 = eltRef2.nextInCell;
-                        continue;
-                    }
-
-                    /* // REMOVED TO TRY GRID CLEAR
-                    grid.remove(ballId1);
-                    grid.remove(ballId2);
-                    */
-
-                    float distance = std::sqrt(distSq);
-                    float invDist = 1.0f / distance;
-                    
-                    float nx = dx * invDist;
-                    float ny = dy * invDist;
-                    
-                    float invM1 = 1.0f / ball1.mass;
-                    float invM2 = 1.0f / ball2.mass;
-                    float sumInvMass = invM1 + invM2;
-
-                    // distancing
-                    float overlap = radDist - distance;
-                    float correction = overlap / sumInvMass;
-                    float cx = nx * correction;
-                    float cy = ny * correction;
-                    
-                    ball1.cx -= cx * invM1;
-                    ball1.cy -= cy * invM1;
-                    ball2.cx += cx * invM2;
-                    ball2.cy += cy * invM2;
-
-                    /* // REMOVED TO TRY GRID CLEAR
-                    grid.insert(ballId1);
-                    grid.insert(ballId2);
-                    */
-                    
-                    // speed management
-                    float dvx = ball2.vx - ball1.vx;
-                    float dvy = ball2.vy - ball1.vy;
-                    float dotProd = dvx * nx + dvy * ny;
-
-                    // if they are going apart, don't change their velocities
-                    if (dotProd > 0.f) {
-                        eltRefId2 = eltRef2.nextInCell;
-                        continue;
-                    }
-
-                    float e = ball1.rest * ball2.rest;
-                    float J = -(1.f + e) * dotProd / sumInvMass;
-                    
-                    float Jnx = J * nx;
-                    float Jny = J * ny;
-                    
-                    ball1.vx -= Jnx * invM1;
-                    ball1.vy -= Jny * invM1;
-                    ball2.vx += Jnx * invM2;
-                    ball2.vy += Jny * invM2;
-
-                    eltRefId2 = eltRef2.nextInCell;
+                    collisionCheck(elt1, elt2);
                 }
-                eltRefId1 = eltRef1.nextInCell;
+                
+                // 2. Collisions against ADJACENT cells (Right, Bottom-Right, Bottom, Bottom-Left)
+                int neighborOffsets[4][2] = {{1, 0}, {1, 1}, {0, 1}, {-1, 1}};
+                
+                for (int k = 0; k < 4; k++) {
+                    int nCol = col + neighborOffsets[k][0];
+                    int nRow = row + neighborOffsets[k][1];
+                    
+                    if (nCol >= 0 && nCol < grid.xNum && nRow < grid.yNum) {
+                        uint32_t nCellId = nRow * grid.xNum + nCol;
+                        uint32_t nStartIdx = grid.cellStart[nCellId];
+                        
+                        if (nStartIdx >= grid.activeParticleCount) continue;
+                        
+                        // Check ball1 against every ball in the neighboring cell
+                        for (uint32_t nIdx = nStartIdx; nIdx < grid.activeParticleCount && grid.indices[nIdx].cellId == nCellId; nIdx++) {
+                            uint32_t ball2 = grid.indices[nIdx].ballId;
+                            Element& elt2 = grid.elements[ball2];
+
+                            collisionCheck(elt1, elt2);
+                        }
+                    }
+                }
             }
         }
     }
-};
+}
 
 void elementInit() {
     srand(time(0));
@@ -413,10 +361,8 @@ void elementInit() {
         float vy = (rand()/fRAND_MAX*2.f - 1)*maxVinit;
         float rest = (rand() / fRAND_MAX) * (maxRest - minRest) + minRest;
         int eltId = grid.addElement({radius, mass, rest, vx, vy, color, cx, cy});
-        grid.insert(eltId);
     }
 }
-
 
 sf::Vector2f findAccel(const sf::Vector2f& cPos) {
     if (gravityRadial && mousePressed) {
@@ -437,6 +383,76 @@ sf::Vector2f findAccel(const sf::Vector2f& cPos) {
     }
 
     return sf::Vector2f(0.f, g);
+}
+
+inline void collisionCheck(Element& elt1, Element& elt2) {
+    // Check the collision!
+
+    float dx = elt2.cx - elt1.cx;
+    float dy = elt2.cy - elt1.cy;
+
+    float r1 = elt1.radius;
+    float r2 = elt2.radius;
+
+    float distSq = dx * dx + dy * dy;
+    float radDist = r1 + r2;
+
+    // skip to next pair if they don't collide
+    if (distSq >= radDist * radDist || distSq <= 0.00001f) {
+        return;
+    }
+
+    /* // REMOVED TO TRY GRID CLEAR
+    grid.remove(ballId1);
+    grid.remove(ballId2);
+    */
+
+    float distance = std::sqrt(distSq);
+    float invDist = 1.0f / distance;
+    
+    float nx = dx * invDist;
+    float ny = dy * invDist;
+    
+    float invM1 = 1.0f / elt1.mass;
+    float invM2 = 1.0f / elt2.mass;
+    float sumInvMass = invM1 + invM2;
+
+    // distancing
+    float overlap = radDist - distance;
+    float correction = overlap / sumInvMass;
+    float cx = nx * correction;
+    float cy = ny * correction;
+    
+    elt1.cx -= cx * invM1;
+    elt1.cy -= cy * invM1;
+    elt2.cx += cx * invM2;
+    elt2.cy += cy * invM2;
+
+    /* // REMOVED TO TRY GRID CLEAR
+    grid.insert(ballId1);
+    grid.insert(ballId2);
+    */
+    
+    // speed management
+    float dvx = elt2.vx - elt1.vx;
+    float dvy = elt2.vy - elt1.vy;
+    float dotProd = dvx * nx + dvy * ny;
+
+    // if they are going apart, don't change their velocities
+    if (dotProd > 0.f) {
+        return;
+    }
+
+    float e = elt1.rest * elt2.rest;
+    float J = -(1.f + e) * dotProd / sumInvMass;
+    
+    float Jnx = J * nx;
+    float Jny = J * ny;
+    
+    elt1.vx -= Jnx * invM1;
+    elt1.vy -= Jny * invM1;
+    elt2.vx += Jnx * invM2;
+    elt2.vy += Jny * invM2;
 }
 
 inline float norm(sf::Vector2f vec) {

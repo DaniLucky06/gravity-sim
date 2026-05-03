@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <SFML/Graphics.hpp>
 
+
+
 template <class T>
 class FreeList {
 private:
@@ -59,6 +61,8 @@ public:
      * @param index Index of element to remove
      */
     void erase (int index) {
+        data[index].element.mass = 0.f;
+        
         data[index].next = first_free;
         first_free = index;
         length--;
@@ -92,6 +96,11 @@ public:
     };
 };
 
+struct ElementIndex {
+    uint32_t cellId;
+    uint32_t ballId;
+};
+
 // The ball
 struct Element {
     float radius;
@@ -103,14 +112,7 @@ struct Element {
 
     // for grid
     float cx, cy; // center pos
-};
-
-// reference to a ball, stored in the list
-struct ElementRef {
-    uint32_t ref;
-
-    uint32_t nextInCell;
-};
+};  
 
 constexpr uint32_t INVALID_REF = 0xFFFFFFFF;
 
@@ -118,21 +120,35 @@ constexpr uint32_t INVALID_REF = 0xFFFFFFFF;
  * Grid class to efficiently manage elements stored in a grid.
  */
 class Grid {
+private:
     float xCellSize, yCellSize;
     float invXCellSize, invYCellSize;
     float width, height;
     
-public:
-    uint32_t xNum, yNum;
-    std::vector<uint32_t> cells;
-    std::vector<FreeList<ElementRef>> rowElements;
+    public:
+    uint32_t xNum, yNum, numCells;
+    uint32_t activeParticleCount;
+    std::vector<uint32_t> cellStart;
+    std::vector<ElementIndex> indices;
+    std::vector<ElementIndex> indicesTemp;
+
     /**
      * @brief List of elements in the grid
      */
     FreeList<Element> elements;
 
     Grid() = default;
-    Grid(float _width, float _height, uint32_t _xNum, uint32_t _yNum);
+    Grid(float _width, float _height, uint32_t _xNum, uint32_t _yNum, uint32_t _nBalls):
+        width(_width), height(_height),
+        xNum(_xNum), yNum(_yNum),
+        
+        xCellSize(_width / _xNum), yCellSize(_height / _yNum),
+
+        invXCellSize(_xNum / _width), invYCellSize(_yNum / _height)
+    {
+        numCells = _xNum * _yNum;
+        cellStart.resize(numCells);
+    };
 
     /**
      * @brief Add `element` to the grid's list (you have to call `insert()`, too)
@@ -153,8 +169,9 @@ public:
      * @brief Remove element from the grid cells (for moving the element)
      * 
      * @param eltId Index of the element to remove
-     */
+     *
     void remove(uint32_t eltId);
+     */
 
     /**
      * @brief Remove an element from the `elements` list. RUN `remove()` FIRST!
@@ -171,12 +188,9 @@ public:
     // void calculateCollisions(std::vector<uint64_t>& collisionPairs);
 
     /**
-     * @brief Cleanup the grid: de-allocate empty rows
-     */
-    void cleanup();
-
-    /**
      * @brief Clear the grid (not the elements list)
      */
     void clear();
+
+    void build();
 };
