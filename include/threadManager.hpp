@@ -31,7 +31,7 @@ public:
                             return !tasks.empty() || stop;
                         });
 
-                        if (tasks.empty() || stop) return;
+                        if (stop && tasks.empty()) return;
                         
                         task = std::move(tasks.front());
                         tasks.pop();
