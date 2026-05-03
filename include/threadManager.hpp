@@ -12,19 +12,22 @@ private:
     std::queue<std::function<void()>> tasks;
     std::mutex mtx;
     std::condition_variable cv;
+    std::condition_variable waitCondition;
+
+    size_t activeTasks = 0;
     bool stop = false;
 
 public:
     ThreadPool(int numThreads = std::thread::hardware_concurrency()) 
     {
         for (size_t i = 0; i < numThreads; i++) {
-            threads.emplace_back([&] {
+            threads.emplace_back([this] {
                 while (true) {
                     std::function<void()> task;
 
                     {
                         std::unique_lock<std::mutex> lock(mtx);
-                        cv.wait(lock, [&] {
+                        cv.wait(lock, [this] {
                             return !tasks.empty() || stop;
                         });
 
@@ -35,6 +38,13 @@ public:
                     }
 
                     task();
+
+                    {
+                        std::unique_lock<std::mutex> lock(mtx);
+                        activeTasks--;
+
+                        if (activeTasks == 0) waitCondition.notify_all();
+                    }
                 }
             });
         }
@@ -57,7 +67,7 @@ public:
     };
 
     template<typename F, typename... Args>
-    void enqueue(F&& task, Args&&... args) 
+    void enqueue(F&& task, Args... args) 
     {
         {
             std::unique_lock<std::mutex> lock(mtx);
@@ -65,8 +75,18 @@ public:
             {
                 task(args...);
             });
+
+            activeTasks++;
         }
 
         cv.notify_one();
+    };
+
+    void waitFinished() {
+        std::unique_lock<std::mutex> lock(mtx);
+        waitCondition.wait(lock, [this] 
+        {
+            return activeTasks == 0;
+        });
     };
 };

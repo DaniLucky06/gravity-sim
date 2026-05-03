@@ -19,9 +19,8 @@ float fps = 60.f;
 float ms = 1.f / fps;
 float fixedDt = 0.0005f;
 
-int subSteps = 1;
-int treeDepth = 6;
-int maxEltPerNode = 3;
+int hwConc = std::thread::hardware_concurrency();
+uint32_t numThreads = (hwConc == 0) ? 4 : hwConc;
 bool debugTimeOutput = false;
 float renderTick = 0.5f;
 
@@ -72,11 +71,13 @@ std::vector<uint32_t> physStorage;
 
 void elementInit();
 sf::Vector2f findAccel(const sf::Vector2f& cPos);
-void threadTask();
 
-float norm(sf::Vector2f vec);
-float dot(sf::Vector2f v1, sf::Vector2f v2);
-float mean(std::vector<uint32_t>& arr);
+void physicsTask(uint32_t startIdx, uint32_t endIdx, sf::Vector2i windowPos);
+void collisionTask(uint32_t startRowIdx, uint32_t endRowIdx, uint8_t j);
+
+inline float norm(sf::Vector2f vec);
+inline float dot(sf::Vector2f v1, sf::Vector2f v2);
+inline float mean(std::vector<uint32_t>& arr);
 
 void parseArguments(int argc, char* argv[]);
 
@@ -84,9 +85,14 @@ float vMinSqr = 2.f;
 float vMaxSqr = 2.f;
 float invVMaxSqr = 1.f / vMaxSqr;
 
+uint32_t maxPhysThreads = std::max(1u, std::min(numThreads, static_cast<uint32_t>(nBalls)));
+uint32_t maxCollThreads = std::max(1u, std::min(numThreads, static_cast<uint32_t>(grid.yNum)));
+
+bool render;
 sf::RenderWindow window(sf::VideoMode({windowSize.x, windowSize.y}), "Bawls");
 int main(int argc, char* argv[]) {
     parseArguments(argc, argv);
+    ThreadPool threadpool(numThreads);
     elementInit();
     
     sf::View fixedView(sf::FloatRect({0.f, 0.f}, {static_cast<float>(windowSize.x), static_cast<float>(windowSize.y)}));
@@ -132,7 +138,7 @@ int main(int argc, char* argv[]) {
         
         sf::Vector2i windowPos = window.getPosition();
         
-        bool render = renderClock.getElapsedTime().asSeconds() >= ms;
+        render = renderClock.getElapsedTime().asSeconds() >= ms;
         if (render) {
             window.clear();
             if (mousePressed) mousePos = static_cast<sf::Vector2f>(sf::Mouse::getPosition()) * pxToM;
@@ -140,233 +146,250 @@ int main(int argc, char* argv[]) {
         
         grid.clear();
         
-        vMaxSqr = 0.f;
         // physics, graphics, border collisions
-        for (int i = 0; i < nBalls; i++) {
-            // grid.remove(i); REMOVED TO TRY GRID CLEAR
+        vMaxSqr = 0.f;
+
+        int ballsPerThread = (nBalls + maxPhysThreads - 1) / maxPhysThreads;
+        for (uint32_t t = 0; t < maxPhysThreads; t++) {
+            uint32_t startIdx = t * ballsPerThread;
+            uint32_t endIdx = std::min(static_cast<uint32_t>(nBalls), startIdx + ballsPerThread);
+            threadpool.enqueue(physicsTask, startIdx, endIdx, windowPos);
+        }
+        threadpool.waitFinished();
+        
+        for (size_t i = 0; i < nBalls; i++) {
             Element& element = grid.elements[i];
-
-            sf::Vector2f pos = {element.cx, element.cy};
-            sf::Vector2f vel = {element.vx, element.vy};
-            
-            sf::Vector2f acc = findAccel(pos);
-            sf::Vector2f vHalf = vel + 0.5f * acc * fixedDt;
-            pos += vHalf * fixedDt;
-            acc = findAccel(pos);
-            vel = vHalf + 0.5f * acc * fixedDt;
-
+            grid.insert(i);
             // update the max velocity
-            float vSqr = vel.length();
-            vMaxSqr = vSqr > vMaxSqr ? vSqr : vMaxSqr;
-
-            // border collisions
-            float radius = element.radius * mToPx;
-            float rest = element.rest;
+            float vSqr = norm({element.vx, element.vy});
+            if (vSqr > vMaxSqr) vMaxSqr = vSqr;
             
-            float px = pos.x * mToPx;
-            float py = pos.y * mToPx;
-            
-            if (px < radius + windowPos.x) {
-                if (vel.x < 0) vel.x = -vel.x * rest;
-                vel.x *= rest;
-
-                px = radius + windowPos.x;
-            } else if (px > windowSize.x - radius + windowPos.x) {
-                if (vel.x > 0) vel.x = -vel.x * rest;
-                vel.x *= rest;
-
-                px = windowSize.x - radius + windowPos.x;
-            }
-            if (py < radius + windowPos.y)  {
-                if (vel.y < 0) vel.y = -vel.y * rest;
-                vel.y *= rest;
-
-                py = radius + windowPos.y;
-            } else if (py > windowSize.y - radius + windowPos.y) {
-                if (vel.y > 0) vel.y = -vel.y * rest;
-                vel.y *= rest;
-
-                py = windowSize.y - radius + windowPos.y;
-            }
-            
-            pos.x = px * pxToM;
-            pos.y = py * pxToM;
-
             // rendering
             if (render) {
+                float radius = element.radius * mToPx;
+                sf::Vector2f pos({element.cx, element.cy});
+                pos *= mToPx;
+                
+                uint32_t& ballColor = element.color;
                 sf::CircleShape circle(radius, 20);
-                circle.setPosition(sf::Vector2f({px, py}) - static_cast<sf::Vector2f>(windowPos));
+                circle.setPosition(sf::Vector2f(pos) - static_cast<sf::Vector2f>(windowPos));
                 circle.setOrigin({radius, radius});
-
+                
                 // calculate ball color
                 float vNorm = vSqr * invVMaxSqr * 0xFF;
                 uint32_t red = vNorm <= 0xFF ? static_cast<uint32_t>(vSqr * invVMaxSqr * 0xFF) : 0xFF;
                 uint32_t blue = vNorm <= 0xFF ? static_cast<uint32_t>((1 - vSqr * invVMaxSqr) * 0xFF) : 0x00;
-                element.color = (red << 24) | ((blue & 0xFF) << 8) | 0x000000FF;
-                sf::Color color(element.color);
-                circle.setFillColor(color);
-
+                ballColor = (red << 24) | ((blue & 0xFF) << 8) | 0x000000FF;
+                circle.setFillColor(sf::Color(ballColor));
+                
                 window.draw(circle);
             }
-            
-            grid.elements[i].cx = pos.x;
-            grid.elements[i].cy = pos.y;
-            grid.elements[i].vx = vel.x;
-            grid.elements[i].vy = vel.y;
-            grid.insert(i);
         }
+        
         physicsTicks++;
-
-
+        
         if (render) {
-            invVMaxSqr = 1 / vMaxSqr;
+            invVMaxSqr = (vMaxSqr > 0.00001f) ? 1 / vMaxSqr : 1.f;
             renderFrames++;
             if (mousePressed) {mouseCircle.setPosition(mousePos * mToPx - static_cast<sf::Vector2f>(windowPos)); window.draw(mouseCircle);}
-
+            
             window.display();
             renderClock.restart();
-
         }
-
-        // ball collisions BROAD
-        for (int row = 0; row < yNum; row++) {
-		if (grid.rowElements[row].length == 0) continue;
-		for (int col = 0; col < xNum; col++) {
-			uint32_t eltRefId1 = grid.cells[row * xNum + col];
-
-			// loop until we reach the last element in the cell
-			while (eltRefId1 != INVALID_REF) {
-				ElementRef& eltRef1 = grid.rowElements[row][eltRefId1];
-				uint32_t eltRefId2 = eltRef1.nextInCell;
-				
-				// if eltRefId
-				while (eltRefId2 != INVALID_REF) {
-					ElementRef& eltRef2 = grid.rowElements[row][eltRefId2];
-
-					if (eltRef1.ref <= eltRef2.ref) {
-						collisionPairs.push_back((static_cast<uint64_t>(eltRef1.ref) << 32) | eltRef2.ref); // insert a hash of the two indexes
-					} else {
-						collisionPairs.push_back((static_cast<uint64_t>(eltRef2.ref) << 32) | eltRef1.ref); // insert a hash of the two indexes
-					}
-
-					eltRefId2 = eltRef2.nextInCell;
-				}
-				eltRefId1 = eltRef1.nextInCell;
-			}
-		}
-	}
-
-        if (!collisionPairs.empty()) {
-            // ball collisions NARROW
-            if (sortDuplication) std::sort(collisionPairs.begin(), collisionPairs.end());
-            // set previous collison pair to not be the first one
-            uint64_t previousCollisionPair = ~collisionPairs[0];
-            for (uint64_t collisionPair : collisionPairs) {
-                // skip if we already checked the collision
-                if (collisionPair == previousCollisionPair) continue;
-
-                uint32_t ballId1 = static_cast<uint32_t>(collisionPair >> 32); // first ball index
-                uint32_t ballId2 = static_cast<uint32_t>(collisionPair & 0xFFFFFFFF); // second ball index
-
-                Element& ball1 = grid.elements[ballId1];
-                Element& ball2 = grid.elements[ballId2];
-
-                float dx = ball2.cx - ball1.cx;
-                float dy = ball2.cy - ball1.cy;
-
-                float r1 = ball1.radius;
-                float r2 = ball2.radius;
-
-                float distSq = dx * dx + dy * dy;
-                float radDist = r1 + r2;
-
-                // skip to next pair if they don't collide
-                if (distSq >= radDist * radDist || distSq <= 0.00001f) {
-                    previousCollisionPair = collisionPair;
-                    continue;
-                }
-
-                /* // REMOVED TO TRY GRID CLEAR
-                grid.remove(ballId1);
-                grid.remove(ballId2);
-                */
-
-                float distance = std::sqrt(distSq);
-                float invDist = 1.0f / distance;
+        
+        // ball collisions
+        uint32_t rowsPerThread = (grid.yNum + maxCollThreads - 1) / maxCollThreads;
+        for (uint8_t j = 0; j < 4; j++) {
+            for (uint32_t t = 0; t < maxCollThreads; t++) {
+                uint32_t startRowIdx = t * rowsPerThread;
+                uint32_t endRowIdx = std::min(grid.yNum, startRowIdx + rowsPerThread);
                 
-                float nx = dx * invDist;
-                float ny = dy * invDist;
+                uint8_t rowPhase = j / 2;
+                if ((startRowIdx % 2) != rowPhase) startRowIdx++;
                 
-                float invM1 = 1.0f / ball1.mass;
-                float invM2 = 1.0f / ball2.mass;
-                float sumInvMass = invM1 + invM2;
-
-                // distancing
-                float overlap = radDist - distance;
-                float correction = overlap / sumInvMass;
-                float cx = nx * correction;
-                float cy = ny * correction;
+                // Prevent out-of-bounds if the phase shift pushes it over the edge
+                if (startRowIdx >= grid.yNum) continue;
                 
-                ball1.cx -= cx * invM1;
-                ball1.cy -= cy * invM1;
-                ball2.cx += cx * invM2;
-                ball2.cy += cy * invM2;
-
-                /* // REMOVED TO TRY GRID CLEAR
-                grid.insert(ballId1);
-                grid.insert(ballId2);
-                */
-                
-                // speed management
-                float dvx = ball2.vx - ball1.vx;
-                float dvy = ball2.vy - ball1.vy;
-                float dotProd = dvx * nx + dvy * ny;
-
-                // if they are going apart, don't change their velocities
-                if (dotProd > 0.f) {
-                    previousCollisionPair = collisionPair;
-                    continue;
-                }
-
-                float e = ball1.rest * ball2.rest;
-                float J = -(1.f + e) * dotProd / sumInvMass;
-                
-                float Jnx = J * nx;
-                float Jny = J * ny;
-                
-                ball1.vx -= Jnx * invM1;
-                ball1.vy -= Jny * invM1;
-                ball2.vx += Jnx * invM2;
-                ball2.vy += Jny * invM2;
-
-                previousCollisionPair = collisionPair;
+                threadpool.enqueue(collisionTask, startRowIdx, endRowIdx, j);
             }
+            threadpool.waitFinished();
         }
-
-        collisionPairs.clear();
+        
         if (metricsClock.getElapsedTime().asSeconds() >= renderTick && debugTimeOutput) {
             std::cout << "FPS: " << renderFrames
-                      << " | Physics Ticks (UPS): " << physicsTicks / renderTick
+            << " | Physics Ticks (UPS): " << physicsTicks / renderTick
                       << "/s | Rapporto: " << (float)physicsTicks / renderFrames
                       << " calcoli per frame | Time scale: " << physicsTicks * fixedDt / renderTick << "\n";
 
-            physStorage.push_back(physicsTicks / renderTick);
-            perfStorage.push_back((float)physicsTicks / renderFrames);
+                      physStorage.push_back(physicsTicks / renderTick);
+                      perfStorage.push_back((float)physicsTicks / renderFrames);
 
-            
-            // Resetta i contatori per il secondo successivo
-            physicsTicks = 0;
+                      
+                      // Resetta i contatori per il secondo successivo
+                      physicsTicks = 0;
             renderFrames = 0;
             metricsClock.restart();
         }
     }
 }
 
-void threadTask() 
+void physicsTask(uint32_t startIdx, uint32_t endIdx, sf::Vector2i windowPos) 
 {
+    for (size_t i = startIdx; i < endIdx; i++) {
+        // grid.remove(i); REMOVED TO TRY GRID CLEAR
+        Element& element = grid.elements[i];
 
+        sf::Vector2f pos = {element.cx, element.cy};
+        sf::Vector2f vel = {element.vx, element.vy};
+        
+        sf::Vector2f acc = findAccel(pos);
+        sf::Vector2f vHalf = vel + 0.5f * acc * fixedDt;
+        pos += vHalf * fixedDt;
+        acc = findAccel(pos);
+        vel = vHalf + 0.5f * acc * fixedDt;
+
+
+        // border collisions
+        float radius = element.radius * mToPx;
+        float rest = element.rest;
+        
+        float px = pos.x * mToPx;
+        float py = pos.y * mToPx;
+        
+        if (px < radius + windowPos.x) {
+            if (vel.x < 0) vel.x = -vel.x * rest;
+            vel.x *= rest;
+
+            px = radius + windowPos.x;
+        } else if (px > windowSize.x - radius + windowPos.x) {
+            if (vel.x > 0) vel.x = -vel.x * rest;
+            vel.x *= rest;
+
+            px = windowSize.x - radius + windowPos.x;
+        }
+        if (py < radius + windowPos.y)  {
+            if (vel.y < 0) vel.y = -vel.y * rest;
+            vel.y *= rest;
+
+            py = radius + windowPos.y;
+        } else if (py > windowSize.y - radius + windowPos.y) {
+            if (vel.y > 0) vel.y = -vel.y * rest;
+            vel.y *= rest;
+
+            py = windowSize.y - radius + windowPos.y;
+        }
+        
+        pos.x = px * pxToM;
+        pos.y = py * pxToM;
+        
+        grid.elements[i].cx = pos.x;
+        grid.elements[i].cy = pos.y;
+        grid.elements[i].vx = vel.x;
+        grid.elements[i].vy = vel.y;
+    }
+}
+
+void collisionTask(uint32_t startRowIdx, uint32_t endRowIdx, uint8_t j) 
+{
+    for (uint32_t row = startRowIdx; row < endRowIdx; row += 2) {
+        if (grid.rowElements[row].length == 0) continue;
+        
+        for (int col = j % 2; col < xNum; col += 2) {
+
+            uint32_t eltRefId1 = grid.cells[row * xNum + col];
+
+            // loop until we reach the last element in the cell
+            while (eltRefId1 != INVALID_REF) {
+                ElementRef& eltRef1 = grid.rowElements[row][eltRefId1];
+                uint32_t eltRefId2 = eltRef1.nextInCell;
+                
+                // if eltRefId
+                while (eltRefId2 != INVALID_REF) {
+                    ElementRef& eltRef2 = grid.rowElements[row][eltRefId2];
+
+                    // Check the collision!
+
+                    uint32_t ballId1 = eltRef1.ref; // first ball index
+                    uint32_t ballId2 = eltRef2.ref; // second ball index
+
+                    Element& ball1 = grid.elements[ballId1];
+                    Element& ball2 = grid.elements[ballId2];
+
+                    float dx = ball2.cx - ball1.cx;
+                    float dy = ball2.cy - ball1.cy;
+
+                    float r1 = ball1.radius;
+                    float r2 = ball2.radius;
+
+                    float distSq = dx * dx + dy * dy;
+                    float radDist = r1 + r2;
+
+                    // skip to next pair if they don't collide
+                    if (distSq >= radDist * radDist || distSq <= 0.00001f) {
+                        eltRefId2 = eltRef2.nextInCell;
+                        continue;
+                    }
+
+                    /* // REMOVED TO TRY GRID CLEAR
+                    grid.remove(ballId1);
+                    grid.remove(ballId2);
+                    */
+
+                    float distance = std::sqrt(distSq);
+                    float invDist = 1.0f / distance;
+                    
+                    float nx = dx * invDist;
+                    float ny = dy * invDist;
+                    
+                    float invM1 = 1.0f / ball1.mass;
+                    float invM2 = 1.0f / ball2.mass;
+                    float sumInvMass = invM1 + invM2;
+
+                    // distancing
+                    float overlap = radDist - distance;
+                    float correction = overlap / sumInvMass;
+                    float cx = nx * correction;
+                    float cy = ny * correction;
+                    
+                    ball1.cx -= cx * invM1;
+                    ball1.cy -= cy * invM1;
+                    ball2.cx += cx * invM2;
+                    ball2.cy += cy * invM2;
+
+                    /* // REMOVED TO TRY GRID CLEAR
+                    grid.insert(ballId1);
+                    grid.insert(ballId2);
+                    */
+                    
+                    // speed management
+                    float dvx = ball2.vx - ball1.vx;
+                    float dvy = ball2.vy - ball1.vy;
+                    float dotProd = dvx * nx + dvy * ny;
+
+                    // if they are going apart, don't change their velocities
+                    if (dotProd > 0.f) {
+                        eltRefId2 = eltRef2.nextInCell;
+                        continue;
+                    }
+
+                    float e = ball1.rest * ball2.rest;
+                    float J = -(1.f + e) * dotProd / sumInvMass;
+                    
+                    float Jnx = J * nx;
+                    float Jny = J * ny;
+                    
+                    ball1.vx -= Jnx * invM1;
+                    ball1.vy -= Jny * invM1;
+                    ball2.vx += Jnx * invM2;
+                    ball2.vy += Jny * invM2;
+
+                    eltRefId2 = eltRef2.nextInCell;
+                }
+                eltRefId1 = eltRef1.nextInCell;
+            }
+        }
+    }
 };
-
 
 void elementInit() {
     srand(time(0));
@@ -416,15 +439,16 @@ sf::Vector2f findAccel(const sf::Vector2f& cPos) {
     return sf::Vector2f(0.f, g);
 }
 
-float norm(sf::Vector2f vec) {
-    return sqrt(vec.x * vec.x + vec.y * vec.y);
+inline float norm(sf::Vector2f vec) {
+    return vec.length();
 }
 
-float dot(sf::Vector2f V1, sf::Vector2f V2) {
-    return V1.x * V2.x + V1.y * V2.y;
+inline float dot(sf::Vector2f V1, sf::Vector2f V2) {
+    return V1.dot(V2);
 }
 
-float mean(std::vector<uint32_t>& arr) {
+inline float mean(std::vector<uint32_t>& arr) {
+    if (arr.size() == 0) return 0.f;
     float sum = 0.f;
     for (uint32_t el : arr) sum += static_cast<float>(el);
     return sum / arr.size();
@@ -437,26 +461,26 @@ void parseArguments(int argc, char* argv[]) {
         if (arg == "-h" || arg == "--help") {
             std::cout << "Usage: gravity-sim [options]\n"
                       << "Options:\n"
-                      << "  --nBalls <int>       Number of balls (default: 2000)\n"
-                      << "  --g <float>          Gravity (default: 9.806)\n"
-                      << "  --G <float>          Mouse gravity constant (default: 1.0)\n"
-                      << "  --rMin <float>       Minimum radius in pixels (default: 5.0)\n"
-                      << "  --rMax <float>       Maximum radius in pixels (default: 5.0)\n"
-                      << "  --rFix <float>       Uniform radius in pixels\n"
-                      << "  --maxV <float>       Maximum initial velocity (default: 0.0)\n"
-                      << "  --density <float>    Ball density (default: 10.0)\n"
-                      << "  --subSteps <int>     Physics sub-steps (default: 1)\n"
-                      << "  --timeScale <float>  Time scale multiplier (default: 1.0)\n"
-                      << "  --physicsDt <float>  Fixed physics delta-time (default: 0.0005)\n"
-                      << "  --fps <float>        Fps (default: 60.0)\n"
-                      << "  --restMin <float>    Minimum restitution (default: 0.7)\n"
-                      << "  --restMax <float>    Maximum restitution (default: 0.7)\n"
-                      << "  --restFix <float>    Uniform restitution\n"
-                      << "  --scale <float>      Window scale (default: 0.5)\n"
-                      << "  --mouseSize <float>  Maximum mouse pull-in radius in pixels (default: 100)\n"
-                      << "  --g-radial           Gravity mode radial\n"
-                      << "  --sort               Sort the collisionPairs array for de-duplication\n"
-                      << "  --debug              Enable console debug output\n";
+                      << "  --nBalls <int>        Number of balls (default: 2000)\n"
+                      << "  --g <float>           Gravity (default: 9.806)\n"
+                      << "  --G <float>           Mouse gravity constant (default: 1.0)\n"
+                      << "  --rMin <float>        Minimum radius in pixels (default: 5.0)\n"
+                      << "  --rMax <float>        Maximum radius in pixels (default: 5.0)\n"
+                      << "  --rFix <float>        Uniform radius in pixels\n"
+                      << "  --maxV <float>        Maximum initial velocity (default: 0.0)\n"
+                      << "  --density <float>     Ball density (default: 10.0)\n"
+                      << "  --timeScale <float>   Time scale multiplier (default: 1.0)\n"
+                      << "  --physicsDt <float>   Fixed physics delta-time (default: 0.0005)\n"
+                      << "  --num-threads <float> Number of threads in the thread pool (default: system managed)\n"
+                      << "  --fps <float>         Fps (default: 60.0)\n"
+                      << "  --restMin <float>     Minimum restitution (default: 0.7)\n"
+                      << "  --restMax <float>     Maximum restitution (default: 0.7)\n"
+                      << "  --restFix <float>     Uniform restitution\n"
+                      << "  --scale <float>       Window scale (default: 0.5)\n"
+                      << "  --mouseSize <float>   Maximum mouse pull-in radius in pixels (default: 100)\n"
+                      << "  --g-radial            Gravity mode radial\n"
+                      << "  --sort                Sort the collisionPairs array for de-duplication\n"
+                      << "  --debug               Enable console debug output\n";
             exit(0);
         }
         else if (arg == "--nBalls" && i + 1 < argc) nBalls = std::stoi(argv[++i]);
@@ -467,9 +491,9 @@ void parseArguments(int argc, char* argv[]) {
         else if (arg == "--rFix" && i + 1 < argc) {maxR = std::stof(argv[++i]); minR = maxR;}
         else if (arg == "--maxV" && i + 1 < argc) maxVinit = std::stof(argv[++i]);
         else if (arg == "--density" && i + 1 < argc) density = std::stof(argv[++i]);
-        else if (arg == "--subSteps" && i + 1 < argc) subSteps = std::stoi(argv[++i]);
         else if (arg == "--timeScale" && i + 1 < argc) timeScale = std::stof(argv[++i]);
         else if (arg == "--physicsDt" && i + 1 < argc) fixedDt = std::stof(argv[++i]);
+        else if (arg == "--num-threads" && i + 1 < argc) numThreads = std::stof(argv[++i]);
         else if (arg == "--fps" && i + 1 < argc) {fps = std::stof(argv[++i]); ms = 1.f / fps;}
         else if (arg == "--restMin" && i + 1 < argc) minRest = std::stof(argv[++i]);
         else if (arg == "--restMax" && i + 1 < argc) maxRest = std::stof(argv[++i]);
