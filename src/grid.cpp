@@ -12,7 +12,7 @@ Grid::Grid(float _width, float _height, uint32_t _xNum, uint32_t _yNum, uint32_t
 {
     numCells = xNum * yNum;
     
-    // Pre-allocate all memory strictly once
+    // Pre-allocate all memory once
     cellStart.resize(numCells);
     indices.resize(nBalls);
     indicesTemp.resize(nBalls);
@@ -21,7 +21,7 @@ Grid::Grid(float _width, float _height, uint32_t _xNum, uint32_t _yNum, uint32_t
 
 void Grid::build() 
 {
-    // 1. Populate the proxy array (O(N))
+    // Proxy array
     for (uint32_t i = 0; i < nBalls; i++) {
         const Element& el = elements[i];
 
@@ -31,7 +31,7 @@ void Grid::build()
         indices[i] = { static_cast<uint32_t>(row * xNum + col), i };
     }
 
-    // 2. 8-bit LSD Radix Sort (O(N) - 4 passes)
+    // 8-bit LSD Radix Sort
     for (int pass = 0; pass < 4; pass++) {
         uint32_t counts[256] = {0};
         uint32_t shift = pass * 8;
@@ -55,7 +55,7 @@ void Grid::build()
         indices.swap(indicesTemp);
     }
 
-    // 3. Build Cell Start Offsets (O(N))
+    // Build Cell Start Offsets
     std::fill(cellStart.begin(), cellStart.end(), nBalls); 
     
     for (uint32_t i = 0; i < nBalls; i++) {

@@ -23,7 +23,7 @@ float fixedDt = 0.0005f;
 int hwConc = std::thread::hardware_concurrency();
 uint32_t numThreads = (hwConc == 0) ? 4 : hwConc;
 bool debugTimeOutput = false;
-float renderTick = 0.5f;
+float renderTick = 1.f;
 
 float minRest = 0.9f;
 float maxRest = 0.9f;
@@ -70,7 +70,7 @@ inline void collisionCheck(Element& elt1, Element& elt2);
 
 
 void physicsTask(uint32_t startIdx, uint32_t endIdx, sf::Vector2i windowPos);
-void collisionTask(uint32_t row);
+void collisionTask(uint32_t col, const int (*offsets)[2]);
 
 inline float norm(sf::Vector2f vec);
 inline float dot(sf::Vector2f v1, sf::Vector2f v2);
@@ -137,9 +137,9 @@ int main(int argc, char* argv[]) {
     std::vector<uint64_t> collisionPairs;
     
     // Build ONCE, outside all loops
-    const int SEGS = 12;
+    const int SEGS = 24;
     sf::VertexArray va(sf::PrimitiveType::Triangles, nBalls * SEGS * 3);
-
+    
     // Pre-compute angles once (avoids recomputing sin/cos every frame)
     std::vector<float> cosA(SEGS), sinA(SEGS);
     for (int s = 0; s < SEGS; s++) {
@@ -147,7 +147,19 @@ int main(int argc, char* argv[]) {
         cosA[s] = std::cos(a);
         sinA[s] = std::sin(a);
     }
+    // 4 sweep configs, rotated each tick
+    constexpr int sweepOffsets[4][4][2] = {
+        {{ 1, 0}, { 1,-1}, { 1, 1}, { 0, 1}},  // right + below
+        {{ 1, 0}, { 1,-1}, { 1, 1}, { 0,-1}},  // right + above
+        {{-1, 0}, {-1,-1}, {-1, 1}, { 0, 1}},  // left  + below
+        {{-1, 0}, {-1,-1}, {-1, 1}, { 0,-1}},  // left  + above
+    };
+    // configs 0,1 are right-sweeps: even cols first
+    // configs 2,3 are left-sweeps:  odd cols first
+    constexpr uint32_t sweepPhase0Start[4] = {0, 0, 1, 1};
 
+    static uint32_t sweepCounter = 0;
+    
     while (window.isOpen())
     {
         // Process events
@@ -177,9 +189,8 @@ int main(int argc, char* argv[]) {
             if (mousePressed) mousePos = static_cast<sf::Vector2f>(sf::Mouse::getPosition()) * pxToM;
         }
         
-        // physics, graphics, border collisions
-        vMaxSqr = 0.f;
-
+        
+        // physics
         uint32_t ballsPerThread = (nBalls + maxPhysThreads - 1) / maxPhysThreads;
         for (uint32_t t = 0; t < maxPhysThreads; t++) {
             uint32_t startIdx = t * ballsPerThread;
@@ -187,22 +198,18 @@ int main(int argc, char* argv[]) {
             threadpool.enqueue(physicsTask, startIdx, endIdx, windowPos);
         }
         threadpool.waitFinished();
-
+        
         // fill the grid
         grid.build();
-        
-
-        // In your main loop:
+                
         vMaxSqr = 0.f;
-
-        // Update vMaxSqr in the same pass as building the VertexArray
         for (size_t i = 0; i < nBalls; i++) {
             Element& el = grid.elements[i];
             float vSqr = norm({el.vx, el.vy});
             if (vSqr > vMaxSqr) vMaxSqr = vSqr;
 
             if (render) {
-                float r  = el.radius * mToPx;
+                float r = el.radius * mToPx / std::cos(M_PI / SEGS);
                 float px = el.cx * mToPx - windowPos.x;
                 float py = el.cy * mToPx - windowPos.y;
 
@@ -221,7 +228,7 @@ int main(int argc, char* argv[]) {
         }
 
         if (render) {
-            window.draw(va);  // ONE draw call
+            window.draw(va);
         }
         
         physicsTicks++;
@@ -235,19 +242,25 @@ int main(int argc, char* argv[]) {
             renderClock.restart();
         }
         
-        // ball collisions — two checkerboard phases
+        // ball collisions — two row phases
+        const int (*offsets)[2] = sweepOffsets[sweepCounter % 4];
+        uint32_t p0 = sweepPhase0Start[sweepCounter % 4];
+        sweepCounter++;
+
         for (uint8_t j = 0; j < 2; j++) {
-            std::atomic<uint32_t> nextCol{j};  // even cols first, then odd
+            uint32_t startCol = (j == 0) ? p0 : 1 - p0;
+            std::atomic<uint32_t> nextCol{startCol};
             for (uint32_t t = 0; t < numThreads; t++) {
-                threadpool.enqueue([&nextCol]() {
+                threadpool.enqueue([&nextCol, offsets]() {
                     uint32_t col;
                     while ((col = nextCol.fetch_add(2)) < grid.xNum)
-                        collisionTask(col);
+                        collisionTask(col, offsets);
                 });
             }
             threadpool.waitFinished();
         }
         
+        // debug output
         if (metricsClock.getElapsedTime().asSeconds() >= renderTick && debugTimeOutput) {
             std::cout << "FPS: " << renderFrames
             << " | Physics Ticks (UPS): " << physicsTicks / renderTick
@@ -321,43 +334,34 @@ void physicsTask(uint32_t startIdx, uint32_t endIdx, sf::Vector2i windowPos)
     }
 }
 
-void collisionTask(uint32_t col)
+void collisionTask(uint32_t col, const int (*offsets)[2])
 {
     for (uint32_t row = 0; row < grid.yNum; row++) {
         uint32_t cellId = row * grid.xNum + col;
         uint32_t startIdx = grid.cellStart[cellId];
-
         if (startIdx >= nBalls) continue;
 
         for (uint32_t idx1 = startIdx; idx1 < nBalls && grid.indices[idx1].cellId == cellId; idx1++) {
             Element& elt1 = grid.elements[grid.indices[idx1].ballId];
 
-            // 1. Same cell
-            for (uint32_t idx2 = idx1 + 1; idx2 < nBalls && grid.indices[idx2].cellId == cellId; idx2++) {
+            for (uint32_t idx2 = idx1 + 1; idx2 < nBalls && grid.indices[idx2].cellId == cellId; idx2++)
                 collisionCheck(elt1, grid.elements[grid.indices[idx2].ballId]);
-            }
 
-            // 2. Neighbours: right, above-right, below-right, below
-            constexpr int neighborOffsets[4][2] = {{1,0}, {1,-1}, {1,1}, {0,1}};
             for (int k = 0; k < 4; k++) {
-                int nCol = static_cast<int>(col) + neighborOffsets[k][0];
-                int nRow = static_cast<int>(row) + neighborOffsets[k][1];
-
-                if (nCol >= static_cast<int>(grid.xNum) || nRow < 0 || nRow >= static_cast<int>(grid.yNum))
+                int nCol = static_cast<int>(col) + offsets[k][0];
+                int nRow = static_cast<int>(row) + offsets[k][1];
+                if (nCol < 0 || nCol >= static_cast<int>(grid.xNum) || nRow < 0 || nRow >= static_cast<int>(grid.yNum))
                     continue;
-
                 uint32_t nCellId = nRow * grid.xNum + nCol;
                 uint32_t nStartIdx = grid.cellStart[nCellId];
-
                 if (nStartIdx >= nBalls) continue;
-
-                for (uint32_t nIdx = nStartIdx; nIdx < nBalls && grid.indices[nIdx].cellId == nCellId; nIdx++) {
+                for (uint32_t nIdx = nStartIdx; nIdx < nBalls && grid.indices[nIdx].cellId == nCellId; nIdx++)
                     collisionCheck(elt1, grid.elements[grid.indices[nIdx].ballId]);
-                }
             }
         }
     }
 }
+
 
 void elementInit() {
     srand(time(0));

@@ -13,7 +13,6 @@ struct Element {
     float vx, vy;
     uint32_t color;
     float cx, cy;
-    char _pad[64 - (7*4 + 4)]; // pad to cache line
 };
 
 constexpr uint32_t INVALID_REF = 0xFFFFFFFF;
@@ -35,7 +34,6 @@ public:
 
     Grid() = default;
     
-    // Pass nBalls into the constructor
     Grid(float _width, float _height, uint32_t _xNum, uint32_t _yNum, uint32_t _nBalls);
 
     void build();
