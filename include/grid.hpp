@@ -3,6 +3,13 @@
 #include <cstdint>
 #include <SFML/Graphics.hpp>
 
+// In grid.hpp — add alongside existing members:
+GLuint elementSSBO;
+GLuint cellStartSSBO;
+GLuint indicesSSBO;
+
+constexpr uint32_t INVALID_REF = 0xFFFFFFFF;
+
 struct ElementIndex {
     uint32_t cellId;
     uint32_t ballId;
@@ -14,8 +21,6 @@ struct Element {
     uint32_t color;
     float cx, cy;
 };
-
-constexpr uint32_t INVALID_REF = 0xFFFFFFFF;
 
 class Grid {
 private:

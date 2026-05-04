@@ -3,13 +3,19 @@
 #include <cmath>
 #include <vector>
 #include <algorithm>
-#include <mutex>
-#include <queue>
-#include <thread>
-#include <atomic>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <filesystem>
 #include <SFML/Graphics.hpp>  
+
 #include "grid.hpp"
 #include "threadManager.hpp"
+#include "gl-helper.h"
+
+#define PHYSICS_SHADER_FILE "physicsShader.glsl"
+#define COLLISION_SHADER_FILE "collisionShader.glsl"
+#define DRAW_SHADER_FILE "drawShader.glsl"
 // eventually add GLM for vector/matrix operations
 
 float g = 9.806e0f;
@@ -115,9 +121,30 @@ int main(int argc, char* argv[]) {
     ThreadPool threadpool(numThreads);
     elementInit();
 
-
     sf::View fixedView(sf::FloatRect({0.f, 0.f}, {static_cast<float>(windowSize.x), static_cast<float>(windowSize.y)}));
     window.setView(fixedView);
+
+    // - GPU INITIALIZATION STUFF - 
+    // physics management shader loading
+    uint physicsShader;
+    createShader(physicsShader, GL_COMPUTE_SHADER, PHYSICS_SHADER_FILE);
+
+    uint collisionShader;
+    createShader(collisionShader, GL_COMPUTE_SHADER, COLLISION_SHADER_FILE);
+
+    // gpu program creation and shader linking
+    uint physicsProgram;
+    createProgram(physicsProgram, physicsShader);
+    uint collisionProgram;
+    createProgram(collisionProgram, collisionShader);
+
+    // load drawing shader
+    uint drawShader;
+    createShader(drawShader, GL_VERTEX_SHADER, DRAW_SHADER_FILE);
+
+
+
+    // --- FROM NOW ON CAN ADD STUFF ---
 
     sf::CircleShape mouseCircle(mouseInfluence * mToPx, 30);
     mouseCircle.setOutlineColor(sf::Color::Red);
@@ -128,7 +155,6 @@ int main(int argc, char* argv[]) {
     // time
     sf::Clock clock;
     sf::Clock renderClock;
-    
     
     sf::Clock metricsClock;
     int physicsTicks = 0;
