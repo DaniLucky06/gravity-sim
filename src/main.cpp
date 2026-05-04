@@ -1,3 +1,4 @@
+#include <glad/glad.h>
 #include <iostream>
 #include <cmath>
 #include <vector>
@@ -7,7 +8,6 @@
 #include <thread>
 #include <atomic>
 #include <SFML/Graphics.hpp>  
-
 #include "grid.hpp"
 #include "threadManager.hpp"
 // eventually add GLM for vector/matrix operations
@@ -97,7 +97,7 @@ int main(int argc, char* argv[]) {
     FULLHEIGHT = FULLHEIGHTPX * pxToM;
     mouseInfluence    = 100.f * pxToM;
     mouseInfluenceSqr = mouseInfluence * mouseInfluence;
-
+    
     parseArguments(argc, argv);
     // 2. Recompute grid dims now that maxR is known from args
     const int xNum = std::ceil(FULLWIDTHPX / (gridMult * 2 * maxR));
