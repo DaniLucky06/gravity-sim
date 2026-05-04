@@ -213,9 +213,14 @@ int main(int argc, char* argv[]) {
                 float px = el.cx * mToPx - windowPos.x;
                 float py = el.cy * mToPx - windowPos.y;
 
+                // Sets the color based on velocity: faster balls are redder, slower balls are bluer
                 float vNorm = vSqr * invVMaxSqr;
-                uint8_t red  = static_cast<uint8_t>(std::min(vNorm, 1.f) * 0xFF);
-                uint8_t blue = static_cast<uint8_t>((1.f - std::min(vNorm, 1.f)) * 0xFF);
+                float vNormMin = std::min(vNorm, 1.f);
+
+                if (vSqr <= 0.12f) vNormMin = 0.f; // deadzone for very slow balls, to avoid distracting color flickering.
+                
+                uint8_t red  = static_cast<uint8_t>(vNormMin * 0xFF);
+                uint8_t blue = static_cast<uint8_t>((1.f - vNormMin) * 0xFF);
                 sf::Color col(red, 0, blue);
 
                 for (int s = 0; s < SEGS; s++) {
